@@ -700,35 +700,40 @@ const batchAICorrect = async () => {
   showBatchAIProgress.value = true
   batchAIState.value = 'running'
   batchAITotal.value = selectedIds.size
-  batchAICurrent.value = 0
-  batchAIProgress.value = 0
+  batchAICurrent.value = selectedIds.size
+  batchAIProgress.value = 50
   batchAIResults.value = []
 
-  const ids = [...selectedIds]
-  const results = []
+  try {
+    const res = await axios.post('/api/questions/batch-ai-correct', {
+      question_ids: [...selectedIds],
+    })
+    const results = res.data.results || []
 
-  for (let i = 0; i < ids.length; i++) {
-    batchAICurrent.value = i + 1
-    batchAIProgress.value = Math.round(((i + 1) / ids.length) * 100)
-    try {
-      const res = await axios.post(`/api/questions/${ids[i]}/ai-correct`)
-      results.push({ question_id: ids[i], ...res.data })
-      if (res.data.needs_llm && res.data.content) {
-        await axios.put(`/api/questions/${ids[i]}`, {
-          content: res.data.content,
-          options: res.data.options,
-          answer: res.data.answer,
-          explanation: res.data.explanation,
-        })
+    // Auto-apply corrections
+    for (const r of results) {
+      if (!r.error && r.needs_llm && r.content) {
+        try {
+          await axios.put(`/api/questions/${r.question_id}`, {
+            content: r.content,
+            options: r.options,
+            answer: r.answer,
+            explanation: r.explanation,
+          })
+        } catch (e) {
+          r.error = '应用失败: ' + (e.response?.data?.detail || e.message)
+        }
       }
-    } catch (e) {
-      results.push({ question_id: ids[i], error: e.response?.data?.detail || e.message })
     }
-  }
 
-  batchAIResults.value = results
-  batchAIState.value = 'done'
-  selectedIds.clear()
+    batchAIResults.value = results
+    batchAIProgress.value = 100
+    batchAIState.value = 'done'
+    selectedIds.clear()
+  } catch (e) {
+    batchAIResults.value = [{ error: e.response?.data?.detail || e.message }]
+    batchAIState.value = 'done'
+  }
 }
 
 const truncate = (text, len) => {
