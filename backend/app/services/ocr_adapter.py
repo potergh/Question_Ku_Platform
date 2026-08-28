@@ -67,14 +67,22 @@ class OCRAdapter:
         questions_json_path = document_dir / "questions.json"
         questions_raw = json.loads(questions_json_path.read_text(encoding="utf-8"))
 
+        # Handle both dict format (with 'questions' key) and legacy list format
+        if isinstance(questions_raw, dict):
+            questions_list = questions_raw.get("questions", [])
+        elif isinstance(questions_raw, list):
+            questions_list = questions_raw
+        else:
+            questions_list = []
+
         # Convert to platform QuestionData
         question_data_list = []
-        for q in questions_raw:
+        for q in questions_list:
             qd = self._convert_question(q, document_dir)
             question_data_list.append(qd)
 
         return OCRResult(
-            manifest=manifest,
+            manifest=questions_raw if isinstance(questions_raw, dict) else {},
             questions=question_data_list,
             output_dir=document_dir,
         )
