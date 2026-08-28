@@ -157,7 +157,7 @@ class OCRAdapter:
         # V1: append figures at the end (OCR doesn't provide position info)
         figures = ocr_question.get("assets", {}).get("figures", [])
         if figures:
-            figure_md = "\n\n".join(f"![figure](asset://figures/{f})" for f in figures)
+            figure_md = "\n\n".join(f"![figure](asset://{f})" for f in figures)
             content = f"{content}\n\n{figure_md}" if content else figure_md
 
         return content.strip()

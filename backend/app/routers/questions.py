@@ -81,8 +81,11 @@ async def list_questions(
 @router.get("/api/questions/{question_id}", response_model=QuestionResponse)
 async def get_question(question_id: str, db: AsyncSession = Depends(get_db)):
     """Get a single question by ID."""
-    question = await db.get(Question, question_id)
-    if not question or question.is_deleted:
+    result = await db.execute(
+        select(Question).where(Question.id == question_id, Question.is_deleted == False).options(selectinload(Question.tags))
+    )
+    question = result.scalar_one_or_none()
+    if not question:
         raise HTTPException(404, "Question not found")
     return question
 
@@ -94,8 +97,11 @@ async def update_question(
     db: AsyncSession = Depends(get_db),
 ):
     """Update question content (user edits)."""
-    question = await db.get(Question, question_id)
-    if not question or question.is_deleted:
+    result = await db.execute(
+        select(Question).where(Question.id == question_id, Question.is_deleted == False).options(selectinload(Question.tags))
+    )
+    question = result.scalar_one_or_none()
+    if not question:
         raise HTTPException(404, "Question not found")
 
     # Update only provided fields
@@ -147,8 +153,11 @@ async def delete_question(question_id: str, db: AsyncSession = Depends(get_db)):
 @router.post("/api/questions/{question_id}/accept-ai")
 async def accept_ai_suggestions(question_id: str, db: AsyncSession = Depends(get_db)):
     """Apply AI suggestions to question fields (tags, difficulty, type)."""
-    question = await db.get(Question, question_id)
-    if not question or question.is_deleted:
+    result = await db.execute(
+        select(Question).where(Question.id == question_id, Question.is_deleted == False).options(selectinload(Question.tags))
+    )
+    question = result.scalar_one_or_none()
+    if not question:
         raise HTTPException(404, "Question not found")
     if not question.ai_suggestions:
         raise HTTPException(400, "No AI suggestions available")

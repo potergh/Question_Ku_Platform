@@ -93,7 +93,7 @@
         </div>
 
         <div class="q-card-body" @click.stop="openDetail(q)">
-          <div class="q-content-preview">{{ truncate(q.content, 150) }}</div>
+          <div class="q-content-preview" v-html="renderContentPreview(q.content, 150)"></div>
           <div class="q-options-preview" v-if="q.options?.length">
             <div v-for="opt in q.options.slice(0, 4)" :key="opt.label" class="opt-line">
               {{ opt.label }}. {{ truncate(opt.content, 40) }}
@@ -355,6 +355,24 @@ const addToHandout = () => {
 const truncate = (text, len) => {
   if (!text) return ''
   return text.length > len ? text.slice(0, len) + '...' : text
+}
+
+// Render content preview with images
+const renderContentPreview = (content, maxLen) => {
+  if (!content) return ''
+  // Extract and render images first
+  const images = []
+  let text = content.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+    images.push(`<img src="${url}" alt="${alt}" style="max-width:120px;max-height:80px;margin:2px;border-radius:3px;vertical-align:middle;" />`)
+    return ''
+  })
+  // Strip remaining markdown
+  text = text.replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1')
+    .replace(/^#{1,4}\s+/gm, '').replace(/\$([^$]+)\$/g, '$1')
+  // Truncate text
+  if (text.length > maxLen) text = text.slice(0, maxLen) + '...'
+  // Combine text + images
+  return text + (images.length ? '<div style="margin-top:4px;">' + images.join('') + '</div>' : '')
 }
 
 const reviewTagType = (s) => ({ pending: 'warning', approved: 'success', rejected: 'danger' })[s] || 'info'

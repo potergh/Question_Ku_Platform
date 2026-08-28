@@ -1,10 +1,12 @@
-"""Upload router — file upload, OCR trigger, source listing."""
+"""Upload router — file upload, OCR trigger, source listing, asset serving."""
 
+import re
 import shutil
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -146,3 +148,76 @@ async def retry_source(source_id: str, db: AsyncSession = Depends(get_db)):
     asyncio.create_task(process_pdf_async(source.id, source.file_path, job.id))
 
     return {"ok": True, "job_id": job.id}
+
+
+# ── OCR Asset serving ────────────────────────────────────────────────
+
+
+def resolve_asset_urls(content: str | None, source_id: str) -> str | None:
+    """Convert asset:// URLs to HTTP-servable /api/ocr-assets/{source_id}/... URLs.
+
+    Handles:
+    - asset://figures/figures/xxx.webp (old buggy double figures/)
+    - asset://figures/xxx.webp (correct)
+    - asset://questions/xxx.webp (card images)
+    """
+    if not content:
+        return content
+
+    def _replace(m):
+        path = m.group(1)
+        # Normalize double figures/figures/ → figures/
+        path = re.sub(r'^figures/figures/', 'figures/', path)
+        return f'/api/ocr-assets/{source_id}/{path}'
+
+    return re.sub(r'asset://([^\s\)]+)', _replace, content)
+
+
+def resolve_card_image_path(path: str | None, source_id: str) -> str | None:
+    """Convert absolute filesystem card_image_path to HTTP URL."""
+    if not path:
+        return path
+    # Extract relative path from the OCR output directory structure
+    # e.g. D:\...\ocr_output\<doc>\questions\Q001.webp → questions/Q001.webp
+    try:
+        p = Path(path)
+        # Find 'ocr_output' in the path parts and take everything after the doc dir
+        parts = p.parts
+        if 'ocr_output' in parts:
+            idx = parts.index('ocr_output')
+            # parts[idx] = 'ocr_output', parts[idx+1] = doc_dir, rest = relative path
+            relative = '/'.join(parts[idx + 2:])
+            return f'/api/ocr-assets/{source_id}/{relative}'
+    except (ValueError, IndexError):
+        pass
+    return path
+
+
+@router.get("/api/ocr-assets/{source_id}/{path:path}")
+async def serve_ocr_asset(source_id: str, path: str, db: AsyncSession = Depends(get_db)):
+    """Serve OCR output files (figures, card images) by source_id + relative path."""
+    source = await db.get(Source, source_id)
+    if not source or not source.ocr_result_path:
+        raise HTTPException(404, "Source or OCR output not found")
+
+    doc_dir = Path(source.ocr_result_path)
+    if not doc_dir.exists():
+        raise HTTPException(404, "OCR output directory not found")
+
+    # Normalize double figures/figures/ → figures/ (for old buggy data)
+    normalized_path = re.sub(r'^figures/figures/', 'figures/', path)
+
+    # Try exact path first, then normalized path
+    file_path = doc_dir / path
+    if not file_path.exists():
+        file_path = doc_dir / normalized_path
+    if not file_path.exists():
+        raise HTTPException(404, f"Asset not found: {path}")
+
+    # Security: ensure the resolved path is within the doc_dir
+    try:
+        file_path.resolve().relative_to(doc_dir.resolve())
+    except ValueError:
+        raise HTTPException(403, "Access denied")
+
+    return FileResponse(str(file_path))

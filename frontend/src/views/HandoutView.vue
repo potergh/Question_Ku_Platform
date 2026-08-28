@@ -120,7 +120,7 @@
                       </span>
                     </div>
                     <div class="q-snapshot-content" v-if="element.question_snapshot">
-                      {{ truncate(element.question_snapshot.content, 200) }}
+                      <div v-html="renderSnapshotContent(element.question_snapshot)"></div>
                     </div>
                     <div class="q-answer-toggle">
                       <el-switch v-model="element.show_answer" active-text="显示答案" inactive-text="隐藏答案" size="small" @change="toggleAnswer(element)" />
@@ -578,7 +578,23 @@ const renderMarkdown = (text) => {
     .replace(/^### (.+)$/gm, '<h4>$1</h4>')
     .replace(/^## (.+)$/gm, '<h3>$1</h3>')
     .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:100%;height:auto;margin:4px 0;border-radius:4px;" />')
     .replace(/\n/g, '<br>')
+}
+
+// Resolve asset:// URLs in question snapshot content
+const resolveAssetUrls = (content, sourceId) => {
+  if (!content) return content
+  return content
+    .replace(/asset:\/\/figures\/figures\//g, `/api/ocr-assets/${sourceId}/figures/`)
+    .replace(/asset:\/\//g, `/api/ocr-assets/${sourceId}/`)
+}
+
+const renderSnapshotContent = (snapshot) => {
+  if (!snapshot || !snapshot.content) return ''
+  const sourceId = snapshot.source_id || ''
+  const resolved = resolveAssetUrls(snapshot.content, sourceId)
+  return renderMarkdown(resolved)
 }
 
 onMounted(() => { loadHandouts() })

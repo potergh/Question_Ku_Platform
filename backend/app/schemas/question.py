@@ -1,7 +1,9 @@
 """Pydantic schemas for Question."""
 
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+
+from app.routers.upload import resolve_asset_urls, resolve_card_image_path
 
 
 class TagBrief(BaseModel):
@@ -38,6 +40,16 @@ class QuestionResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode='after')
+    def transform_asset_urls(self):
+        """Convert asset:// URLs and absolute paths to HTTP-servable URLs."""
+        if self.source_id:
+            if self.content and 'asset://' in self.content:
+                self.content = resolve_asset_urls(self.content, self.source_id)
+            if self.card_image_path and ('\\' in (self.card_image_path or '') or self.card_image_path.startswith('/')):
+                self.card_image_path = resolve_card_image_path(self.card_image_path, self.source_id)
+        return self
 
 
 class QuestionUpdate(BaseModel):
