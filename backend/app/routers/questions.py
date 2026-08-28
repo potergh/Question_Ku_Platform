@@ -369,13 +369,21 @@ async def batch_ai_tag(
 ):
     """Batch AI auto-tagging — sends all questions in one LLM call."""
     from app.services.ai_service import auto_tag_questions_batch, AIServiceError
+    from sqlalchemy.orm import selectinload
+    import logging
+    logger = logging.getLogger(__name__)
 
-    # Collect questions data
+    # Collect questions data with tags eagerly loaded
     questions_data = []
     question_objs = {}
     for qid in question_ids:
-        question = await db.get(Question, qid)
-        if not question or question.is_deleted:
+        result = await db.execute(
+            select(Question)
+            .options(selectinload(Question.tags))
+            .where(Question.id == qid, Question.is_deleted == False)
+        )
+        question = result.scalar_one_or_none()
+        if not question:
             continue
         questions_data.append({
             "id": qid,
@@ -391,7 +399,13 @@ async def batch_ai_tag(
     try:
         results = await auto_tag_questions_batch(db, questions_data)
     except AIServiceError as e:
+        logger.error(f"AI service error: {e}")
         raise HTTPException(503, f"AI service unavailable: {e}")
+    except Exception as e:
+        logger.error(f"Batch AI tag error: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(500, f"Internal error: {type(e).__name__}: {str(e)}")
 
     tagged = 0
     for r in results:
