@@ -12,6 +12,7 @@ class JobResponse(BaseModel):
     source_id: str | None
     handout_id: str | None
     error_message: str | None
+    cancelled: bool = False
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None

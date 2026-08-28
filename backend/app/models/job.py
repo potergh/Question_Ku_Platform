@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -22,6 +22,7 @@ class Job(Base):
     source_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     handout_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancelled: Mapped[bool] = mapped_column(Boolean, default=False)  # Cancellation flag
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -23,6 +23,7 @@ async def process_pdf_async(source_id: str, pdf_path: str, job_id: str):
     """Run OCR in background thread, update DB when done.
 
     Called via asyncio.create_task() after upload.
+    Supports cancellation via job.cancelled flag.
     """
     async with async_session_factory() as db:
         # Mark job as running
@@ -40,6 +41,19 @@ async def process_pdf_async(source_id: str, pdf_path: str, job_id: str):
             await db.commit()
 
         try:
+            # Check for cancellation before starting OCR
+            job = await db.get(Job, job_id)
+            if job and job.cancelled:
+                logger.info(f"OCR cancelled before start for source {source_id}")
+                source = await db.get(Source, source_id)
+                if source:
+                    source.ocr_status = "error"
+                job.status = "failed"
+                job.error_message = "用户取消"
+                job.finished_at = datetime.now()
+                await db.commit()
+                return
+
             # Run OCR in thread pool (it's CPU-bound)
             loop = asyncio.get_event_loop()
 
@@ -56,6 +70,19 @@ async def process_pdf_async(source_id: str, pdf_path: str, job_id: str):
                     settings.ocr_output_dir,
                 ),
             )
+
+            # Check for cancellation after OCR completes
+            job = await db.get(Job, job_id)
+            if job and job.cancelled:
+                logger.info(f"OCR cancelled after processing for source {source_id}")
+                source = await db.get(Source, source_id)
+                if source:
+                    source.ocr_status = "error"
+                job.status = "failed"
+                job.error_message = "用户取消"
+                job.finished_at = datetime.now()
+                await db.commit()
+                return
 
             # Update progress: OCR done, saving to DB
             job = await db.get(Job, job_id)

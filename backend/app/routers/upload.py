@@ -3,6 +3,7 @@
 import re
 import shutil
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Body
@@ -163,6 +164,32 @@ async def clear_failed_jobs(db: AsyncSession = Depends(get_db)):
     )
     await db.commit()
     return {"ok": True, "cleared": result.rowcount}
+
+
+@router.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, db: AsyncSession = Depends(get_db)):
+    """Request cancellation of a running job."""
+    job = await db.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    
+    if job.status not in ("queued", "running"):
+        raise HTTPException(400, "只能取消排队中或处理中的任务")
+    
+    job.cancelled = True
+    if job.status == "queued":
+        job.status = "failed"
+        job.error_message = "用户取消"
+        job.finished_at = datetime.now()
+        
+        # Also update source status
+        if job.source_id:
+            source = await db.get(Source, job.source_id)
+            if source:
+                source.ocr_status = "error"
+    
+    await db.commit()
+    return {"ok": True, "status": "cancelled" if job.status == "running" else "failed"}
 
 
 @router.get("/api/jobs", response_model=list[JobResponse])

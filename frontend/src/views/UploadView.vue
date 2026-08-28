@@ -83,9 +83,21 @@
       <div v-for="job in activeJobs" :key="job.id" class="job-item">
         <div class="job-header">
           <span class="job-filename">{{ job.filename || '未知文件' }}</span>
-          <el-tag :type="jobStatusType(job)" size="small">
-            {{ jobStatusText(job) }}
-          </el-tag>
+          <div class="job-header-actions">
+            <el-tag :type="jobStatusType(job)" size="small">
+              {{ jobStatusText(job) }}
+            </el-tag>
+            <el-button
+              v-if="job.status === 'queued' || job.status === 'running'"
+              text
+              type="danger"
+              size="small"
+              @click="cancelJob(job)"
+              :loading="job.cancelling"
+            >
+              取消
+            </el-button>
+          </div>
         </div>
         <el-progress
           :percentage="Math.round(job.progress || 0)"
@@ -98,7 +110,7 @@
           <el-icon style="color: #f56c6c; margin-right: 4px;"><WarningFilled /></el-icon>
           {{ job.error_message }}
           <el-button
-            v-if="job.source_id"
+            v-if="job.source_id && job.error_message !== '用户取消'"
             type="primary"
             size="small"
             link
@@ -335,6 +347,21 @@ const retrySource = async (sourceId) => {
   }
 }
 
+const cancelJob = async (job) => {
+  try {
+    await ElMessageBox.confirm('确定取消此任务？OCR处理将停止。', '提示', { type: 'warning' })
+    job.cancelling = true
+    await axios.post(`/api/jobs/${job.id}/cancel`)
+    ElMessage.success('任务已取消')
+    loadJobs()
+    loadSources()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('取消失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    job.cancelling = false
+  }
+}
+
 const deleteSource = async (sourceId) => {
   try {
     await ElMessageBox.confirm('确定删除此试卷？相关题目和文件将被永久删除。', '警告', { type: 'warning' })
@@ -495,6 +522,12 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.job-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .job-filename {
