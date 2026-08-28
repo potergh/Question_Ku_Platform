@@ -20,6 +20,32 @@ from app.schemas.handout import (
 router = APIRouter()
 
 
+async def _patch_snapshots(handouts_or_handout, db: AsyncSession):
+    """Ensure question_snapshot has source_id for all items (patch old data)."""
+    # Normalize to list of items
+    if isinstance(handouts_or_handout, list):
+        all_items = []
+        for h in handouts_or_handout:
+            all_items.extend(h.items)
+    else:
+        all_items = handouts_or_handout.items
+
+    # Find items missing source_id in snapshot
+    need_patch = []
+    for item in all_items:
+        if (item.question_snapshot is not None
+                and not item.question_snapshot.get("source_id")
+                and item.question_id):
+            need_patch.append(item)
+
+    if need_patch:
+        for item in need_patch:
+            q = await db.get(Question, item.question_id)
+            if q:
+                item.question_snapshot["source_id"] = q.source_id
+        await db.commit()
+
+
 @router.get("/api/handouts", response_model=HandoutListResponse)
 async def list_handouts(db: AsyncSession = Depends(get_db)):
     """List all handouts with their items."""
@@ -27,6 +53,7 @@ async def list_handouts(db: AsyncSession = Depends(get_db)):
         select(Handout).options(selectinload(Handout.items)).order_by(Handout.created_at.desc())
     )
     handouts = result.scalars().all()
+    await _patch_snapshots(handouts, db)
     return HandoutListResponse(handouts=handouts, total=len(handouts))
 
 
@@ -54,6 +81,7 @@ async def get_handout(handout_id: str, db: AsyncSession = Depends(get_db)):
     handout = result.scalar_one_or_none()
     if not handout:
         raise HTTPException(404, "Handout not found")
+    await _patch_snapshots(handout, db)
     return handout
 
 
@@ -118,6 +146,7 @@ async def add_item(
             "question_type": question.question_type,
             "score": question.score,
             "question_number": question.question_number,
+            "source_id": question.source_id,
         }
 
     item = HandoutItem(
@@ -216,8 +245,24 @@ async def export_handout(
     if format == "docx":
         # Word export
         from app.services.word_export import generate_word
+        from app.models import Source
+
+        # Build source OCR dirs mapping
+        source_ocr_dirs = {}
+        for item in handout.items:
+            sid = None
+            if item.question_snapshot and item.question_snapshot.get("source_id"):
+                sid = item.question_snapshot["source_id"]
+            elif item.question_id:
+                q = await db.get(Question, item.question_id)
+                if q:
+                    sid = q.source_id
+            if sid and sid not in source_ocr_dirs:
+                source = await db.get(Source, sid)
+                if source and source.ocr_result_path:
+                    source_ocr_dirs[sid] = source.ocr_result_path
         
-        buffer = generate_word(handout, version=version)
+        buffer = generate_word(handout, version=version, source_ocr_dirs=source_ocr_dirs)
         version_suffix = "_student" if version == "student" else "_teacher"
         filename = f"{handout.title}{version_suffix}.docx"
         output_path = settings.export_dir / f"{handout_id}{version_suffix}.docx"
@@ -237,7 +282,7 @@ async def export_handout(
         )
     else:
         # PDF export (default)
-        html = _render_handout_html(handout)
+        html = await _render_handout_html(handout, db)
 
         # Use Playwright to render and export PDF
         import asyncio
@@ -271,8 +316,32 @@ async def export_handout(
         )
 
 
-def _render_handout_html(handout: Handout) -> str:
-    """Render handout as HTML with KaTeX support."""
+async def _render_handout_html(handout: Handout, db: AsyncSession) -> str:
+    """Render handout as HTML with KaTeX support and resolved images."""
+    # Pre-load source OCR paths for image resolution
+    source_ocr_dirs = {}
+    source_ids = set()
+    for item in handout.items:
+        sid = None
+        if item.question_snapshot and item.question_snapshot.get("source_id"):
+            sid = item.question_snapshot["source_id"]
+        elif item.question_id:
+            # Fallback: look up source_id from the question
+            q = await db.get(Question, item.question_id)
+            if q:
+                sid = q.source_id
+                # Also patch the snapshot for future use
+                if item.question_snapshot is not None:
+                    item.question_snapshot["source_id"] = sid
+        if sid:
+            source_ids.add(sid)
+    if source_ids:
+        from app.models import Source
+        for sid in source_ids:
+            source = await db.get(Source, sid)
+            if source and source.ocr_result_path:
+                source_ocr_dirs[sid] = source.ocr_result_path
+
     items_html = []
     for item in sorted(handout.items, key=lambda i: i.order):
         if item.item_type == "section_title":
@@ -280,8 +349,10 @@ def _render_handout_html(handout: Handout) -> str:
         elif item.item_type in ("question", "example", "exercise") and item.question_snapshot:
             snap = item.question_snapshot
             content = snap.get("content", "") or ""
-            # Escape HTML but preserve Markdown structure
-            content = _markdown_to_html(content)
+            source_id = snap.get("source_id", "")
+            ocr_dir = source_ocr_dirs.get(source_id, "")
+            # Resolve asset:// URLs and convert to HTML
+            content = _markdown_to_html(content, ocr_dir=ocr_dir)
 
             options_html = ""
             options = snap.get("options") or []
@@ -337,6 +408,7 @@ def _render_handout_html(handout: Handout) -> str:
     .q-number {{ font-weight: bold; font-size: 15px; }}
     .score {{ color: #909399; font-size: 13px; margin-left: 8px; }}
     .q-content {{ margin-bottom: 8px; }}
+    .q-content img {{ max-width: 100%; height: auto; margin: 8px 0; display: block; }}
     .options {{ list-style: none; padding-left: 8px; }}
     .options li {{ margin-bottom: 4px; }}
     .answer-section {{ margin-top: 10px; padding: 8px 12px; background: #f0f9eb; border-radius: 4px; font-size: 13px; }}
@@ -353,13 +425,45 @@ def _render_handout_html(handout: Handout) -> str:
 </html>"""
 
 
-def _markdown_to_html(text: str) -> str:
-    """Minimal Markdown to HTML conversion for handout rendering."""
+def _markdown_to_html(text: str, ocr_dir: str = "") -> str:
+    """Minimal Markdown to HTML conversion for handout rendering.
+    
+    Handles images, LaTeX, bold, italic, and line breaks.
+    If ocr_dir is provided, asset:// URLs are resolved to local file:// paths.
+    """
     import re
     if not text:
         return ""
 
-    # Preserve LaTeX ($...$) by not touching it
+    # Images: ![alt](url) → <img>
+    def _img_replace(m):
+        alt = m.group(1)
+        url = m.group(2)
+        # Resolve asset:// URLs to file:// paths
+        if url.startswith("asset://") and ocr_dir:
+            path = url[len("asset://"):]
+            # Normalize double figures/figures/ → figures/
+            path = re.sub(r'^figures/figures/', 'figures/', path)
+            from pathlib import Path
+            file_path = Path(ocr_dir) / path
+            if file_path.exists():
+                url = file_path.as_uri()
+        elif url.startswith("/api/ocr-assets/"):
+            # Convert API URL back to file path
+            parts = url.split("/", 4)  # ['', 'api', 'ocr-assets', 'source_id', 'path']
+            if len(parts) >= 5 and ocr_dir:
+                from pathlib import Path
+                file_path = Path(ocr_dir) / parts[4]
+                # Normalize double figures/
+                normalized = re.sub(r'^figures/figures/', 'figures/', parts[4])
+                file_path = Path(ocr_dir) / normalized
+                if file_path.exists():
+                    url = file_path.as_uri()
+        return f'<img src="{url}" alt="{alt}" style="max-width:100%;height:auto;margin:6px 0;" />'
+
+    text = re.sub(r'!\[([^\]]*)\]\(([^)]+)\)', _img_replace, text)
+
+    # Preserve LaTeX ($...$) by not touching it — KaTeX auto-render handles it
     # Bold
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     # Italic

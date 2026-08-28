@@ -13,7 +13,7 @@ from docx.oxml.ns import qn
 logger = logging.getLogger(__name__)
 
 
-def generate_word(handout, version: str = "teacher") -> BytesIO:
+def generate_word(handout, version: str = "teacher", source_ocr_dirs: dict | None = None) -> BytesIO:
     """
     Generate a Word document from a handout.
     
@@ -55,7 +55,9 @@ def generate_word(handout, version: str = "teacher") -> BytesIO:
         
         elif item.item_type in ("question", "example", "exercise"):
             if item.question_snapshot:
-                _add_question(doc, item, question_num, version)
+                source_id = item.question_snapshot.get("source_id", "")
+                ocr_dir = (source_ocr_dirs or {}).get(source_id, "")
+                _add_question(doc, item, question_num, version, ocr_dir=ocr_dir)
                 question_num += 1
         
         elif item.item_type == "knowledge_note":
@@ -84,8 +86,8 @@ def _add_section_title(doc: Document, title: str):
     pPr.append(pBdr)
 
 
-def _add_question(doc: Document, item, num: int, version: str):
-    """Add a question with optional answer/explanation."""
+def _add_question(doc: Document, item, num: int, version: str, ocr_dir: str = ""):
+    """Add a question with optional answer/explanation and images."""
     snap = item.question_snapshot or {}
     
     # Question header
@@ -108,11 +110,9 @@ def _add_question(doc: Document, item, num: int, version: str):
         score_run.font.size = Pt(9)
         score_run.font.color.rgb = RGBColor(128, 128, 128)
     
-    # Question content
+    # Question content — split text and images
     content = snap.get("content", "") or ""
-    content = _latex_to_text(content)
-    if content:
-        doc.add_paragraph(content)
+    _add_content_with_images(doc, content, ocr_dir)
     
     # Options
     options = snap.get("options") or []
@@ -174,6 +174,65 @@ def _add_knowledge_note(doc: Document, content: str):
     run.italic = True
     
     doc.add_paragraph()
+
+
+def _add_content_with_images(doc: Document, content: str, ocr_dir: str = ""):
+    """Add content to document, splitting text and images.
+    
+    Handles asset:// URLs by resolving them to local file paths.
+    """
+    if not content:
+        return
+    
+    # Split content into segments: text and images
+    # Pattern matches ![alt](url)
+    parts = re.split(r'(!\[[^\]]*\]\([^)]+\))', content)
+    
+    for part in parts:
+        img_match = re.match(r'!\[([^\]]*)\]\(([^)]+)\)', part)
+        if img_match:
+            url = img_match.group(2)
+            # Resolve asset:// or /api/ocr-assets/ URLs to local file path
+            image_path = _resolve_image_path(url, ocr_dir)
+            if image_path and Path(image_path).exists():
+                try:
+                    p = doc.add_paragraph()
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    run = p.add_run()
+                    run.add_picture(image_path, width=Inches(4.5))
+                except Exception as e:
+                    logger.warning(f"Failed to add image {image_path}: {e}")
+                    doc.add_paragraph(f"[图片加载失败]")
+            else:
+                doc.add_paragraph(f"[图片]")
+        else:
+            # Text segment — convert LaTeX and add
+            text = _latex_to_text(part)
+            if text.strip():
+                doc.add_paragraph(text)
+
+
+def _resolve_image_path(url: str, ocr_dir: str) -> str | None:
+    """Resolve an image URL to a local file path."""
+    if not ocr_dir:
+        return None
+    
+    path = None
+    if url.startswith("asset://"):
+        path = url[len("asset://"):]
+        # Normalize double figures/figures/ → figures/
+        path = re.sub(r'^figures/figures/', 'figures/', path)
+    elif url.startswith("/api/ocr-assets/"):
+        parts = url.split("/", 4)  # ['', 'api', 'ocr-assets', 'source_id', 'path']
+        if len(parts) >= 5:
+            path = parts[4]
+            path = re.sub(r'^figures/figures/', 'figures/', path)
+    elif url.startswith("file://"):
+        return url[7:]  # Strip file:// prefix
+    
+    if path:
+        return str(Path(ocr_dir) / path)
+    return None
 
 
 def _latex_to_text(text: str) -> str:
