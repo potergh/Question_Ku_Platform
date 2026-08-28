@@ -55,6 +55,16 @@
             <el-slider v-model="form.ai_temperature" :min="0" :max="2" :step="0.1" show-input />
           </el-form-item>
 
+          <el-form-item label="修正 Prompt">
+            <el-input
+              v-model="form.ai_review_prompt"
+              type="textarea"
+              :autosize="{ minRows: 3, maxRows: 10 }"
+              placeholder="留空使用默认 Prompt。可自定义 AI 修正指令，支持学科变量 {学科}"
+            />
+            <div class="form-hint">AI 修正题目时使用的系统提示词，留空使用默认模板</div>
+          </el-form-item>
+
           <el-form-item>
             <el-button @click="testConnection" :loading="testing">测试连接</el-button>
             <el-button type="primary" @click="saveSettings" :loading="saving">保存</el-button>
@@ -125,6 +135,7 @@ const form = reactive({
   ai_base_url: 'https://api.openai.com/v1',
   ai_model: 'gpt-4o',
   ai_temperature: 0.7,
+  ai_review_prompt: '',
 })
 
 const maskedKey = ref(null)
@@ -157,6 +168,7 @@ const loadSettings = async () => {
     form.ai_base_url = d.ai_base_url
     form.ai_model = d.ai_model
     form.ai_temperature = d.ai_temperature
+    form.ai_review_prompt = d.ai_review_prompt || ''
     maskedKey.value = d.ai_api_key_masked
   } catch (e) { console.error(e) }
 }
@@ -170,6 +182,7 @@ const saveSettings = async () => {
       ai_base_url: form.ai_base_url,
       ai_model: form.ai_model,
       ai_temperature: form.ai_temperature,
+      ai_review_prompt: form.ai_review_prompt || null,
     }
     // Only send key if user typed something new
     if (form.ai_api_key && form.ai_api_key !== maskedKey.value) {

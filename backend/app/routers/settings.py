@@ -38,6 +38,7 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
         ai_base_url=s.ai_base_url,
         ai_model=s.ai_model,
         ai_temperature=s.ai_temperature,
+        ai_review_prompt=s.ai_review_prompt,
     )
 
 
@@ -64,6 +65,7 @@ async def update_settings(data: SettingsUpdate, db: AsyncSession = Depends(get_d
         ai_base_url=s.ai_base_url,
         ai_model=s.ai_model,
         ai_temperature=s.ai_temperature,
+        ai_review_prompt=s.ai_review_prompt,
     )
 
 

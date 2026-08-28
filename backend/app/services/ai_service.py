@@ -39,7 +39,7 @@ async def _get_ai_config(db: AsyncSession) -> dict:
     }
 
 
-async def _call_llm(db: AsyncSession, messages: list[dict], temperature: float | None = None) -> str:
+async def _call_llm(db: AsyncSession, messages: list[dict], temperature: float | None = None, timeout: float = 60) -> str:
     """Call the LLM API and return the response text."""
     config = await _get_ai_config(db)
 
@@ -54,7 +54,7 @@ async def _call_llm(db: AsyncSession, messages: list[dict], temperature: float |
         "temperature": temperature if temperature is not None else config["temperature"],
     }
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=timeout) as client:
         try:
             resp = await client.post(url, headers=headers, json=payload)
         except httpx.ConnectError as e:

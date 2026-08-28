@@ -59,7 +59,8 @@
     <div class="batch-bar" v-if="selectedIds.size > 0">
       <span>已选 <b>{{ selectedIds.size }}</b> 题</span>
       <el-button type="success" size="small" @click="batchApprove">批量通过</el-button>
-      <el-button type="warning" size="small" @click="showTagDialog = true">批量打标签</el-button>
+      <el-button type="warning" size="small" @click="batchAICorrect">AI 批量修正</el-button>
+      <el-button type="info" size="small" @click="showTagDialog = true">批量打标签</el-button>
       <el-button type="primary" size="small" @click="addToHandout">加入讲义</el-button>
       <el-button type="danger" size="small" @click="batchDelete">批量删除</el-button>
       <el-button text size="small" @click="selectedIds.clear()">取消选择</el-button>
@@ -185,8 +186,12 @@
           </el-col>
         </el-row>
 
-        <div style="margin-top: 16px; display: flex; gap: 8px;">
+        <div style="margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap;">
           <el-button type="primary" @click="saveDetail">保存</el-button>
+          <el-button type="warning" @click="aiCorrectSingle" :loading="aiCorrecting">
+            <el-icon v-if="!aiCorrecting"><MagicStick /></el-icon>
+            AI 修正
+          </el-button>
           <el-button v-if="detailQuestion.review_status === 'pending'" type="success" @click="quickReview('approve')">通过</el-button>
           <el-button v-if="detailQuestion.review_status === 'pending'" type="danger" @click="quickReview('reject')">驳回</el-button>
         </div>
@@ -217,6 +222,72 @@
         <el-button type="primary" @click="doBatchTag">确认</el-button>
       </template>
     </el-dialog>
+
+    <!-- AI Correction Preview Dialog -->
+    <el-dialog v-model="showAIPreview" title="AI 修正预览" width="700px" top="5vh">
+      <div v-if="aiPreviewData" class="ai-preview">
+        <el-alert type="info" :closable="false" style="margin-bottom: 12px;">
+          <span v-if="aiPreviewData.needs_llm">AI 已修正以下内容，请检查后确认应用</span>
+          <span v-else>内容质量良好，无需 AI 修正</span>
+        </el-alert>
+        <div v-if="aiPreviewData.analysis?.problems?.length" class="ai-problems">
+          <b>检测到的问题：</b>
+          <ul><li v-for="p in aiPreviewData.analysis.problems" :key="p">{{ p }}</li></ul>
+        </div>
+        <!-- Content comparison -->
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <h4>原始内容</h4>
+            <div class="preview-box original">{{ aiPreviewData.original_content }}</div>
+          </el-col>
+          <el-col :span="12">
+            <h4>AI 修正后</h4>
+            <div class="preview-box corrected" v-html="renderFullContent(aiPreviewData.content)"></div>
+          </el-col>
+        </el-row>
+        <!-- Options comparison -->
+        <div v-if="aiPreviewData.options?.length" style="margin-top: 12px;">
+          <h4>选项对比</h4>
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <div v-for="opt in aiPreviewData.original_options" :key="opt.label" class="opt-compare">
+                {{ opt.label }}. {{ opt.content || '(空)' }}
+              </div>
+            </el-col>
+            <el-col :span="12">
+              <div v-for="opt in aiPreviewData.options" :key="opt.label" class="opt-compare">
+                {{ opt.label }}. {{ opt.content || '(空)' }}
+              </div>
+            </el-col>
+          </el-row>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showAIPreview = false">取消</el-button>
+        <el-button type="primary" @click="acceptAICorrection" :disabled="!aiPreviewData?.needs_llm">
+          应用修正
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Batch AI Progress Dialog -->
+    <el-dialog v-model="showBatchAIProgress" title="AI 批量修正" width="500px">
+      <div v-if="batchAIState === 'running'">
+        <el-progress :percentage="batchAIProgress" :status="batchAIProgress === 100 ? 'success' : ''" />
+        <p style="margin-top: 8px; color: #909399;">正在修正第 {{ batchAICurrent }} / {{ batchAITotal }} 题...</p>
+      </div>
+      <div v-if="batchAIState === 'done'">
+        <el-result icon="success" title="批量修正完成">
+          <template #sub-title>
+            成功 {{ batchAIResults.filter(r => !r.error).length }} 题，
+            失败 {{ batchAIResults.filter(r => r.error).length }} 题
+          </template>
+        </el-result>
+      </div>
+      <template #footer>
+        <el-button v-if="batchAIState === 'done'" type="primary" @click="showBatchAIProgress = false; loadQuestions()">完成</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -239,6 +310,17 @@ const detailPreviewMode = ref(true) // true = preview, false = edit
 const aiAccepted = ref(false)
 const showTagDialog = ref(false)
 const selectedTagIds = ref([])
+
+// AI correction state
+const aiCorrecting = ref(false)
+const showAIPreview = ref(false)
+const aiPreviewData = ref(null)
+const showBatchAIProgress = ref(false)
+const batchAIState = ref('idle') // idle / running / done
+const batchAIProgress = ref(0)
+const batchAICurrent = ref(0)
+const batchAITotal = ref(0)
+const batchAIResults = ref([])
 
 const filters = reactive({
   search: '',
@@ -413,6 +495,98 @@ const addToHandout = () => {
   ElMessage.info(`已选 ${selectedIds.size} 题，讲义选择功能开发中`)
 }
 
+// ── AI Correction ──
+
+const aiCorrectSingle = async () => {
+  if (!detailQuestion.value) return
+  aiCorrecting.value = true
+  try {
+    const res = await axios.post(`/api/questions/${detailQuestion.value.id}/ai-correct`)
+    aiPreviewData.value = {
+      ...res.data,
+      original_content: detailQuestion.value.content || '',
+      original_options: detailQuestion.value.options ? JSON.parse(JSON.stringify(detailQuestion.value.options)) : [],
+    }
+    showAIPreview.value = true
+  } catch (e) {
+    ElMessage.error('AI 修正失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    aiCorrecting.value = false
+  }
+}
+
+const acceptAICorrection = async () => {
+  if (!aiPreviewData.value || !detailQuestion.value) return
+  const d = aiPreviewData.value
+  const q = detailQuestion.value
+  // Apply corrected content to the detail question
+  q.content = d.content
+  if (d.options && d.options.length > 0) q.options = d.options
+  if (d.answer) q.answer = d.answer
+  if (d.explanation) q.explanation = d.explanation
+  // Save to backend
+  try {
+    await axios.put(`/api/questions/${q.id}`, {
+      content: q.content,
+      options: q.options,
+      answer: q.answer,
+      explanation: q.explanation,
+    })
+    ElMessage.success('已应用 AI 修正')
+    showAIPreview.value = false
+    loadQuestions()
+    // Refresh detail view
+    const res2 = await axios.get(`/api/questions/${q.id}`)
+    detailQuestion.value = res2.data
+  } catch (e) {
+    ElMessage.error('保存失败')
+  }
+}
+
+const batchAICorrect = async () => {
+  if (selectedIds.size === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `将对 ${selectedIds.size} 道题执行 AI 修正，每道题会消耗一次 AI 调用。继续？`,
+      'AI 批量修正', { type: 'info' }
+    )
+  } catch { return }
+
+  showBatchAIProgress.value = true
+  batchAIState.value = 'running'
+  batchAITotal.value = selectedIds.size
+  batchAICurrent.value = 0
+  batchAIProgress.value = 0
+  batchAIResults.value = []
+
+  const ids = [...selectedIds]
+  const results = []
+
+  for (let i = 0; i < ids.length; i++) {
+    batchAICurrent.value = i + 1
+    batchAIProgress.value = Math.round(((i + 1) / ids.length) * 100)
+    try {
+      const res = await axios.post(`/api/questions/${ids[i]}/ai-correct`)
+      results.push({ question_id: ids[i], ...res.data })
+      // Auto-apply if AI made corrections
+      if (res.data.needs_llm && res.data.content) {
+        await axios.put(`/api/questions/${ids[i]}`, {
+          content: res.data.content,
+          options: res.data.options,
+          answer: res.data.answer,
+          explanation: res.data.explanation,
+        })
+      }
+    } catch (e) {
+      results.push({ question_id: ids[i], error: e.response?.data?.detail || e.message })
+    }
+  }
+
+  batchAIResults.value = results
+  batchAIState.value = 'done'
+  selectedIds.clear()
+}
+
 const truncate = (text, len) => {
   if (!text) return ''
   return text.length > len ? text.slice(0, len) + '...' : text
@@ -549,5 +723,45 @@ onMounted(() => {
 .rendered-preview :deep(.katex-display) {
   margin: 12px 0;
   overflow-x: auto;
+}
+
+/* AI Correction Preview */
+.ai-preview .ai-problems {
+  background: #fef0f0;
+  border: 1px solid #fde2e2;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.ai-preview .ai-problems ul {
+  margin: 4px 0 0 16px;
+  padding: 0;
+}
+.preview-box {
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 300px;
+  overflow-y: auto;
+  min-height: 80px;
+}
+.preview-box.original {
+  background: #f5f5f5;
+  border: 1px solid #e4e7ed;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #606266;
+}
+.preview-box.corrected {
+  background: #f0f9eb;
+  border: 1px solid #e1f3d8;
+  color: #303133;
+}
+.opt-compare {
+  font-size: 13px;
+  padding: 2px 0;
+  color: #606266;
 }
 </style>

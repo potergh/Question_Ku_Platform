@@ -1,6 +1,6 @@
 """Settings model — AI config stored in DB, API key masked on read."""
 
-from sqlalchemy import Float, Integer, String
+from sqlalchemy import Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -17,6 +17,7 @@ class Settings(Base):
     ai_base_url: Mapped[str] = mapped_column(String(500), default="https://api.openai.com/v1")
     ai_model: Mapped[str] = mapped_column(String(100), default="gpt-4o")
     ai_temperature: Mapped[float] = mapped_column(Float, default=0.7)
+    ai_review_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     @staticmethod
     def mask_key(key: str | None) -> str | None:

@@ -9,6 +9,7 @@ class SettingsResponse(BaseModel):
     ai_base_url: str
     ai_model: str
     ai_temperature: float
+    ai_review_prompt: str | None = None
 
 
 class SettingsUpdate(BaseModel):
@@ -17,6 +18,7 @@ class SettingsUpdate(BaseModel):
     ai_base_url: str | None = None
     ai_model: str | None = None
     ai_temperature: float | None = None
+    ai_review_prompt: str | None = None
 
 
 class TestConnectionRequest(BaseModel):

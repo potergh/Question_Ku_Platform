@@ -1,4 +1,4 @@
-"""Question router — list, update, review, soft-delete, search, batch ops."""
+"""Question router — list, update, review, soft-delete, search, batch ops, AI correct."""
 
 from datetime import datetime
 from typing import Annotated
@@ -262,3 +262,81 @@ async def batch_delete(
             count += 1
     await db.commit()
     return {"ok": True, "count": count}
+
+
+# ── AI Correction ────────────────────────────────────────────────────
+
+
+@router.post("/api/questions/{question_id}/ai-correct")
+async def ai_correct_question(
+    question_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """AI-correct a single question's OCR content.
+
+    Returns the corrected content WITHOUT saving — user reviews then saves manually.
+    """
+    from app.services.ai_correct import correct_question
+
+    result = await db.execute(
+        select(Question)
+        .where(Question.id == question_id, Question.is_deleted == False)
+        .options(selectinload(Question.tags))
+    )
+    question = result.scalar_one_or_none()
+    if not question:
+        raise HTTPException(404, "Question not found")
+
+    # Get card image absolute path
+    card_image = question.card_image_path
+
+    corrected = await correct_question(
+        db=db,
+        content=question.content or question.raw_ocr_content or "",
+        options=question.options,
+        answer=question.answer,
+        explanation=question.explanation,
+        subject=question.subject,
+        card_image_path=card_image,
+    )
+
+    return corrected
+
+
+@router.post("/api/questions/batch-ai-correct")
+async def batch_ai_correct(
+    question_ids: list[str] = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+):
+    """AI-correct multiple questions. Returns results for user review."""
+    from app.services.ai_correct import correct_question
+
+    results = []
+    for qid in question_ids:
+        result = await db.execute(
+            select(Question).where(Question.id == qid, Question.is_deleted == False)
+        )
+        question = result.scalar_one_or_none()
+        if not question:
+            results.append({"question_id": qid, "error": "未找到"})
+            continue
+
+        try:
+            corrected = await correct_question(
+                db=db,
+                content=question.content or question.raw_ocr_content or "",
+                options=question.options,
+                answer=question.answer,
+                explanation=question.explanation,
+                subject=question.subject,
+                card_image_path=question.card_image_path,
+            )
+            results.append({
+                "question_id": qid,
+                "question_number": question.question_number,
+                **corrected,
+            })
+        except Exception as e:
+            results.append({"question_id": qid, "error": str(e)})
+
+    return {"ok": True, "results": results}
