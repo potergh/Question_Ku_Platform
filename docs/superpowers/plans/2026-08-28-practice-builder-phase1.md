@@ -491,7 +491,7 @@ git commit -m "feat: 选题池 API（加入/移除/重排/清空/统计）"
 - Create: Alembic 迁移（autogenerate）
 
 **Interfaces:**
-- Produces: `Practice`（id/title/subtitle/subject/grade/status/page_config JSON/时间戳，sections 关系）、`PracticeSection`（title/section_type/position/show_title/start_on_new_page，questions 关系）、`PracticeQuestion`（source_question_id 无外键、position、question_number、question_type、subject、difficulty、score、content_snapshot/options_snapshot/answer_snapshot/explanation_snapshot、source_version、is_modified、layout_config JSON，blocks 关系）、`PracticeContentBlock`（block_type/position/content/style_config/source_asset_id）。级联删除：Practice → sections → questions → blocks。
+- Produces: `Practice`（id/title/subtitle/subject/grade/status/page_config JSON/时间戳，sections 关系）、`PracticeSection`（title/section_type/position/show_title/start_on_new_page，questions 关系）、`PracticeQuestion`（source_question_id 无外键、position、question_number、question_type、subject、difficulty、score、content_snapshot/options_snapshot/answer_snapshot/explanation_snapshot、source_version、is_modified、layout_config JSON，blocks 关系）、`PracticeContentBlock`（block_type/position/content/style_config/source_asset_id）。级联删除：Practice → sections → questions → blocks（内部关联列设外键 + ondelete CASCADE；仅 source_question_id 不设外键）。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -545,7 +545,7 @@ Expected: FAIL（ImportError）
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -574,7 +574,7 @@ class PracticeSection(Base):
     __tablename__ = "practice_sections"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    practice_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    practice_id: Mapped[str] = mapped_column(String(36), ForeignKey("practices.id", ondelete="CASCADE"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     section_type: Mapped[str] = mapped_column(String(50), nullable=False)  # 题型中文名或 "custom"
     position: Mapped[int] = mapped_column(Integer, default=0)
@@ -594,8 +594,8 @@ class PracticeQuestion(Base):
     __tablename__ = "practice_questions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    practice_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    section_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    practice_id: Mapped[str] = mapped_column(String(36), ForeignKey("practices.id", ondelete="CASCADE"), nullable=False, index=True)
+    section_id: Mapped[str] = mapped_column(String(36), ForeignKey("practice_sections.id", ondelete="CASCADE"), nullable=False, index=True)
     # 不设外键：快照独立于题库，原题删除不影响练习
     source_question_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
@@ -625,7 +625,7 @@ class PracticeContentBlock(Base):
     __tablename__ = "practice_content_blocks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    practice_question_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    practice_question_id: Mapped[str] = mapped_column(String(36), ForeignKey("practice_questions.id", ondelete="CASCADE"), nullable=False, index=True)
     block_type: Mapped[str] = mapped_column(String(30), nullable=False)  # text/image/options/answer_space/answer/explanation
     position: Mapped[int] = mapped_column(Integer, default=0)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -767,7 +767,7 @@ Expected: FAIL（`_copy_referenced_assets` / `create_practice_from_questions` �
 
 - [ ] **Step 3: 在 practice_service.py 追加实现**
 
-顶部补充 import：`from app.models import Question, Source`（`snapshot_question` 的类型标注需要 `Question`）、`from app.models.practice import Practice, PracticeSection, PracticeQuestion`、`from app.utils.question_types import map_question_type`（`re/shutil/uuid/Path/select/AsyncSession/settings` 已有）。追加：
+顶部补充 import：`from app.models import Question, Source`（`snapshot_question` 的类型标注需要 `Question`）、`from app.models.practice import Practice, PracticeSection, PracticeQuestion`、`from app.utils.question_types import map_question_type`、`from sqlalchemy.orm import selectinload`（commit 后需预加载 relationship，否则懒加载报 MissingGreenlet；`re/shutil/uuid/Path/select/AsyncSession/settings` 已有）。追加：
 
 ```python
 async def snapshot_question(
@@ -844,8 +844,12 @@ async def create_practice_from_questions(
             await snapshot_question(db, practice, section, q, i)
 
     await db.commit()
-    await db.refresh(practice)
-    return practice
+    result = await db.execute(
+        select(Practice)
+        .where(Practice.id == practice.id)
+        .options(selectinload(Practice.sections).selectinload(PracticeSection.questions))
+    )
+    return result.scalar_one()
 ```
 
 - [ ] **Step 4: 运行测试，确认通过**
