@@ -4,6 +4,16 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
+class TagBrief(BaseModel):
+    """Brief tag info embedded in question responses."""
+    id: str
+    name: str
+    category: str
+    color: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class QuestionResponse(BaseModel):
     id: str
     source_id: str
@@ -23,6 +33,7 @@ class QuestionResponse(BaseModel):
     review_status: str
     ocr_confidence: float | None
     is_deleted: bool
+    tags: list[TagBrief] = []
     created_at: datetime
 
     model_config = {"from_attributes": True}

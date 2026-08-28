@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
-from app.routers import upload, questions, handouts
+from app.routers import upload, questions, handouts, tags
 
 
 logging.basicConfig(level=logging.INFO)
@@ -43,6 +43,7 @@ app.add_middleware(
 app.include_router(upload.router)
 app.include_router(questions.router)
 app.include_router(handouts.router)
+app.include_router(tags.router)
 
 
 @app.get("/api/health")
