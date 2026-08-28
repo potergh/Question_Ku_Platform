@@ -438,17 +438,7 @@ async def batch_ai_tag(
                 if tag and tag not in question.tags:
                     question.tags.append(tag)
 
-        # Apply question_type if not set
-        ai_qtype = r.get("question_type")
-        if ai_qtype and not question.question_type:
-            for eng, chn in QUESTION_TYPE_MAP.items():
-                if chn == ai_qtype:
-                    question.question_type = eng
-                    break
-            else:
-                question.question_type = ai_qtype
-
-        # Apply difficulty if not set
+        # Apply difficulty if not set (AI fills tags + difficulty, question_type comes from OCR)
         ai_diff = r.get("difficulty")
         if ai_diff and not question.difficulty:
             question.difficulty = ai_diff
