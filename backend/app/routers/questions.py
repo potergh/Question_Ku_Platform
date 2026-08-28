@@ -405,6 +405,7 @@ async def batch_ai_tag(
             "content": question.content or "",
             "options": question.options,
             "answer": question.answer,
+            "subject": question.subject,  # For filtering tags by subject
         })
         question_objs[qid] = question
 

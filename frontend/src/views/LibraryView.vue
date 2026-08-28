@@ -921,9 +921,27 @@ const batchAITag = async () => {
     return
   }
 
+  // Get subjects of selected questions and filter tags by those subjects
+  const selectedSubjects = new Set()
+  for (const q of questions.value) {
+    if (selectedIds.has(q.id) && q.subject) {
+      selectedSubjects.add(q.subject)
+    }
+  }
+
+  // Filter tags by selected subjects
+  const relevantTags = allTags.value.filter(t => selectedSubjects.has(t.subject))
+  const tagCount = relevantTags.length
+
+  if (tagCount === 0) {
+    const subjectNames = Array.from(selectedSubjects).map(s => subjectText(s)).join('、')
+    ElMessage.warning(`请先为${subjectNames}学科创建标签`)
+    return
+  }
+
   try {
     await ElMessageBox.confirm(
-      `将对 ${selectedIds.size} 道题执行 AI 批量打标，AI 会从已创建的 ${allTags.value.length} 个标签中选择合适的。继续？`,
+      `将对 ${selectedIds.size} 道题执行 AI 批量打标，AI 会从已创建的 ${tagCount} 个${Array.from(selectedSubjects).length === 1 ? subjectText(Array.from(selectedSubjects)[0]) : '相关'}学科的标签中选择合适的。继续？`,
       'AI 批量打标', { type: 'info' }
     )
   } catch { return }

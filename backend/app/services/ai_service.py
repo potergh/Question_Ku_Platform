@@ -317,13 +317,22 @@ async def auto_tag_questions_batch(
     if not questions:
         return []
 
-    # Get available tags
-    result = await db.execute(select(Tag).order_by(Tag.category, Tag.name))
+    # Get subjects of selected questions
+    subjects = set()
+    for q in questions:
+        if q.get("subject"):
+            subjects.add(q["subject"])
+
+    # Get available tags filtered by subjects
+    query = select(Tag).order_by(Tag.category, Tag.name)
+    if subjects:
+        query = query.where(Tag.subject.in_(subjects))
+    result = await db.execute(query)
     tags = result.scalars().all()
     if not tags:
         return [{"id": q["id"], "tag_ids": [], "difficulty": None, "question_type": None, "confidence": 0} for q in questions]
 
-    tag_text = "\n".join([f"ID:{t.id} | {t.category} | {t.name}" for t in tags[:80]])
+    tag_text = "\n".join([f"ID:{t.id} | {t.subject}/{t.category} | {t.name}" for t in tags[:80]])
 
     # Build all questions summary
     q_summaries = []
