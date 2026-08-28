@@ -341,7 +341,11 @@
     </el-dialog>
 
     <!-- Batch Tag Dialog -->
-    <el-dialog v-model="showTagDialog" title="批量打标签" width="450px">
+    <el-dialog v-model="showTagDialog" title="批量标签操作" width="450px">
+      <el-radio-group v-model="batchTagMode" style="margin-bottom: 12px;">
+        <el-radio-button label="add">添加标签</el-radio-button>
+        <el-radio-button label="remove">移除标签</el-radio-button>
+      </el-radio-group>
       <el-select v-model="batchTagSubject" placeholder="按学科筛选" clearable @change="() => {}" style="width: 100%; margin-bottom: 8px;">
         <el-option label="物理" value="physics" />
         <el-option label="数学" value="math" />
@@ -351,9 +355,15 @@
       <el-select v-model="selectedTagIds" multiple placeholder="选择标签" filterable style="width: 100%;">
         <el-option v-for="t in batchFilteredTags" :key="t.id" :label="`${subjectText(t.subject)} / ${categoryText(t.category)} / ${t.name}`" :value="t.id" />
       </el-select>
+      <p style="color: #909399; font-size: 12px; margin-top: 8px;">
+        <span v-if="batchTagMode === 'add'">将为选中的 {{ selectedIds.size }} 道题添加这些标签</span>
+        <span v-else style="color: #f56c6c;">将从选中的 {{ selectedIds.size }} 道题移除这些标签</span>
+      </p>
       <template #footer>
         <el-button @click="showTagDialog = false">取消</el-button>
-        <el-button type="primary" @click="doBatchTag">确认</el-button>
+        <el-button :type="batchTagMode === 'remove' ? 'danger' : 'primary'" @click="doBatchTag">
+          {{ batchTagMode === 'add' ? '确认添加' : '确认移除' }}
+        </el-button>
       </template>
     </el-dialog>
 
@@ -463,6 +473,7 @@ const aiAccepted = ref(false)
 const showTagDialog = ref(false)
 const selectedTagIds = ref([])
 const batchTagSubject = ref('')
+const batchTagMode = ref('add') // add / remove
 
 // Tag management state
 const showTagMgmt = ref(false)
@@ -650,17 +661,33 @@ const batchDelete = async () => {
 }
 
 const doBatchTag = async () => {
+  if (selectedTagIds.value.length === 0) {
+    ElMessage.warning('请选择至少一个标签')
+    return
+  }
+
+  const isRemove = batchTagMode.value === 'remove'
+  const actionText = isRemove ? '移除' : '添加'
+
   try {
-    await axios.post('/api/questions/batch-tag', {
+    await ElMessageBox.confirm(
+      `确定要${actionText} ${selectedTagIds.value.length} 个标签到 ${selectedIds.size} 道题？`,
+      '确认操作', { type: isRemove ? 'warning' : 'info' }
+    )
+  } catch { return }
+
+  try {
+    const endpoint = isRemove ? '/api/questions/batch-untag' : '/api/questions/batch-tag'
+    await axios.post(endpoint, {
       question_ids: [...selectedIds],
       tag_ids: selectedTagIds.value,
     })
-    ElMessage.success('标签已添加')
+    ElMessage.success(`标签已${actionText}`)
     showTagDialog.value = false
     selectedTagIds.value = []
     loadQuestions()
   } catch (e) {
-    ElMessage.error('打标签失败')
+    ElMessage.error(`${actionText}标签失败`)
   }
 }
 
@@ -867,19 +894,30 @@ const batchAITag = async () => {
   showBatchTagProgress.value = true
   batchTagState.value = 'running'
   batchTagTotal.value = selectedIds.size
-  batchTagProgress.value = 50
+  batchTagProgress.value = 0
   batchTagResult.value = 0
+
+  // Smooth progress animation - increment gradually
+  const progressInterval = setInterval(() => {
+    if (batchTagProgress.value < 90) {
+      batchTagProgress.value += 8
+      if (batchTagProgress.value > 90) batchTagProgress.value = 90
+    }
+  }, 600)
 
   try {
     const res = await axios.post('/api/questions/batch-ai-tag', {
       question_ids: [...selectedIds],
     })
+    clearInterval(progressInterval)
     batchTagResult.value = res.data.tagged || 0
     batchTagProgress.value = 100
     batchTagState.value = 'done'
     selectedIds.clear()
     loadQuestions()
   } catch (e) {
+    clearInterval(progressInterval)
+    batchTagProgress.value = 100
     batchTagState.value = 'done'
     ElMessage.error('AI 批量打标失败: ' + (e.response?.data?.detail || e.message))
   }
