@@ -29,11 +29,6 @@ SUBJECT_MAP = {
     "math": "数学",
     "chemistry": "化学",
     "english": "英语",
-    "chinese": "语文",
-    "biology": "生物",
-    "history": "历史",
-    "geography": "地理",
-    "politics": "政治",
 }
 
 

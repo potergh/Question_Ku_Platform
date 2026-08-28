@@ -1,6 +1,7 @@
-"""Tag model — knowledge/skill/error_type/custom only.
+"""Tag model — organized by subject + category (knowledge/skill/error_type/custom).
 
-NOT responsible for subject/difficulty/type (those are Question columns).
+Tags are primarily grouped by subject (physics/math/chemistry/english),
+then by category within each subject.
 """
 
 import uuid
@@ -25,6 +26,7 @@ class Tag(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    subject: Mapped[str | None] = mapped_column(String(20), nullable=True)  # physics/math/chemistry/english
     category: Mapped[str] = mapped_column(String(30), nullable=False)  # knowledge/skill/error_type/custom
     color: Mapped[str | None] = mapped_column(String(20), nullable=True)
     parent_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tags.id"), nullable=True)

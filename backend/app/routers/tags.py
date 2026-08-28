@@ -14,12 +14,15 @@ router = APIRouter()
 @router.get("/api/tags", response_model=list[TagResponse])
 async def list_tags(
     category: str | None = Query(default=None),
+    subject: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all tags, optionally filtered by category."""
-    query = select(Tag).order_by(Tag.category, Tag.name)
+    """List all tags, optionally filtered by category and/or subject."""
+    query = select(Tag).order_by(Tag.subject, Tag.category, Tag.name)
     if category:
         query = query.where(Tag.category == category)
+    if subject:
+        query = query.where(Tag.subject == subject)
     result = await db.execute(query)
     return result.scalars().all()
 
@@ -47,6 +50,7 @@ async def create_tag(data: TagCreate, db: AsyncSession = Depends(get_db)):
     """Create a new tag."""
     tag = Tag(
         name=data.name,
+        subject=data.subject,
         category=data.category,
         color=data.color,
         parent_id=data.parent_id,

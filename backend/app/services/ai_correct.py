@@ -53,7 +53,7 @@ DEFAULT_REVIEW_PROMPT = """你是一位教学助理，负责修正 OCR 识别的
 
 _SUBJECT_NAMES = {
     "physics": "物理", "math": "数学", "chemistry": "化学",
-    "english": "英语", "chinese": "语文",
+    "english": "英语",
 }
 
 

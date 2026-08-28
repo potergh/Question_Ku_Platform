@@ -7,6 +7,7 @@ from pydantic import BaseModel
 class TagResponse(BaseModel):
     id: str
     name: str
+    subject: str | None = None
     category: str
     color: str | None
     parent_id: str | None
@@ -17,6 +18,7 @@ class TagResponse(BaseModel):
 
 class TagCreate(BaseModel):
     name: str
+    subject: str | None = None
     category: str
     color: str | None = None
     parent_id: str | None = None
@@ -24,6 +26,7 @@ class TagCreate(BaseModel):
 
 class TagUpdate(BaseModel):
     name: str | None = None
+    subject: str | None = None
     color: str | None = None
     parent_id: str | None = None
 
@@ -32,6 +35,7 @@ class TagTree(BaseModel):
     """Tag with children for tree display."""
     id: str
     name: str
+    subject: str | None = None
     category: str
     color: str | None
     parent_id: str | None

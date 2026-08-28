@@ -404,7 +404,7 @@ const statusText = (status) => {
 }
 
 const subjectText = (subject) => {
-  const map = { physics: '物理', math: '数学', chemistry: '化学', english: '英语', chinese: '语文' }
+  const map = { physics: '物理', math: '数学', chemistry: '化学', english: '英语' }
   return map[subject] || subject || '-'
 }
 

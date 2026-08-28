@@ -56,7 +56,7 @@
       <el-row style="margin-top: 8px;" :gutter="12" align="middle">
         <el-col :span="8">
           <el-select v-model="filters.tag_ids" multiple placeholder="按标签筛选" clearable filterable @change="loadQuestions" style="width: 100%;">
-            <el-option v-for="t in allTags" :key="t.id" :label="`${categoryText(t.category)} / ${t.name}`" :value="t.id" />
+            <el-option v-for="t in allTags" :key="t.id" :label="`${subjectText(t.subject)} / ${categoryText(t.category)} / ${t.name}`" :value="t.id" />
           </el-select>
         </el-col>
         <el-col :span="4">
@@ -251,14 +251,22 @@
     </el-drawer>
 
     <!-- Tag Management Dialog -->
-    <el-dialog v-model="showTagMgmt" title="标签管理" width="550px">
-      <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-        <el-tabs v-model="mgmtCategory" style="flex: 1;" @tab-change="() => {}">
-          <el-tab-pane label="知识点" name="knowledge" />
-          <el-tab-pane label="技能" name="skill" />
-          <el-tab-pane label="错因" name="error_type" />
-          <el-tab-pane label="自定义" name="custom" />
-        </el-tabs>
+    <el-dialog v-model="showTagMgmt" title="标签管理" width="600px">
+      <!-- Subject tabs (primary level) -->
+      <el-tabs v-model="mgmtSubject" style="margin-bottom: 12px;">
+        <el-tab-pane label="物理" name="physics" />
+        <el-tab-pane label="数学" name="math" />
+        <el-tab-pane label="化学" name="chemistry" />
+        <el-tab-pane label="英语" name="english" />
+      </el-tabs>
+      <!-- Category sub-tabs (secondary level) -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <el-radio-group v-model="mgmtCategory" size="small">
+          <el-radio-button label="knowledge">知识点</el-radio-button>
+          <el-radio-button label="skill">技能</el-radio-button>
+          <el-radio-button label="error_type">错因</el-radio-button>
+          <el-radio-button label="custom">自定义</el-radio-button>
+        </el-radio-group>
         <el-button type="primary" size="small" @click="showCreateTag = true">
           <el-icon><Plus /></el-icon> 新增
         </el-button>
@@ -278,6 +286,14 @@
     <!-- Create/Edit Tag Dialog -->
     <el-dialog v-model="showCreateTag" :title="editingTagItem ? '编辑标签' : '新增标签'" width="400px" append-to-body>
       <el-form @submit.prevent="saveTagItem">
+        <el-form-item label="学科">
+          <el-select v-model="tagForm.subject" :disabled="!!editingTagItem">
+            <el-option label="物理" value="physics" />
+            <el-option label="数学" value="math" />
+            <el-option label="化学" value="chemistry" />
+            <el-option label="英语" value="english" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="名称">
           <el-input v-model="tagForm.name" placeholder="标签名称" />
         </el-form-item>
@@ -302,7 +318,7 @@
     <!-- Batch Tag Dialog -->
     <el-dialog v-model="showTagDialog" title="批量打标签" width="400px">
       <el-select v-model="selectedTagIds" multiple placeholder="选择标签" filterable style="width: 100%;">
-        <el-option v-for="t in allTags" :key="t.id" :label="`${categoryText(t.category)} / ${t.name}`" :value="t.id" />
+        <el-option v-for="t in allTags" :key="t.id" :label="`${subjectText(t.subject)} / ${categoryText(t.category)} / ${t.name}`" :value="t.id" />
       </el-select>
       <template #footer>
         <el-button @click="showTagDialog = false">取消</el-button>
@@ -402,8 +418,9 @@ const selectedTagIds = ref([])
 const showTagMgmt = ref(false)
 const showCreateTag = ref(false)
 const editingTagItem = ref(null)
+const mgmtSubject = ref('physics')
 const mgmtCategory = ref('knowledge')
-const tagForm = reactive({ name: '', category: 'knowledge', color: null })
+const tagForm = reactive({ name: '', subject: 'physics', category: 'knowledge', color: null })
 const detailTagSelect = ref('')
 const aiTagging = ref(false)
 
@@ -435,7 +452,6 @@ const availableSubjects = computed(() => {
     { value: 'math', label: '数学' },
     { value: 'chemistry', label: '化学' },
     { value: 'english', label: '英语' },
-    { value: 'chinese', label: '语文' },
   ]
   // Add any additional subjects from sources
   const sourceSubjects = new Set(sources.value.filter(s => s.ocr_status === 'done' && s.subject).map(s => s.subject))
@@ -689,10 +705,11 @@ const truncate = (text, len) => {
 const reviewTagType = (s) => ({ pending: 'warning', approved: 'success', rejected: 'danger' })[s] || 'info'
 const reviewText = (s) => ({ pending: '待审核', approved: '已通过', rejected: '已驳回' })[s] || s
 const categoryText = (c) => ({ knowledge: '知识点', skill: '技能', error_type: '错因', custom: '自定义' })[c] || c
+const subjectText = (s) => ({ physics: '物理', math: '数学', chemistry: '化学', english: '英语' })[s] || s || '未分类'
 
 // ── Tag Management ──
 
-const filteredMgmtTags = computed(() => allTags.value.filter(t => t.category === mgmtCategory.value))
+const filteredMgmtTags = computed(() => allTags.value.filter(t => t.subject === mgmtSubject.value && t.category === mgmtCategory.value))
 
 const availableTagsForDetail = computed(() => {
   if (!detailQuestion.value) return allTags.value
@@ -777,6 +794,7 @@ const batchAITag = async () => {
 const editTagItem = (tag) => {
   editingTagItem.value = tag
   tagForm.name = tag.name
+  tagForm.subject = tag.subject || 'physics'
   tagForm.category = tag.category
   tagForm.color = tag.color
   showCreateTag.value = true
@@ -788,7 +806,7 @@ const saveTagItem = async () => {
       await axios.put(`/api/tags/${editingTagItem.value.id}`, { ...tagForm })
       ElMessage.success('标签已更新')
     } else {
-      await axios.post('/api/tags', { name: tagForm.name, category: mgmtCategory.value, color: tagForm.color })
+      await axios.post('/api/tags', { name: tagForm.name, subject: mgmtSubject.value, category: mgmtCategory.value, color: tagForm.color })
       ElMessage.success('标签已创建')
     }
     showCreateTag.value = false
