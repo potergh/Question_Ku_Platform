@@ -1,8 +1,13 @@
 <template>
   <div class="library-view">
     <div class="library-header">
-      <h2>题库管理</h2>
-      <p class="subtitle">浏览、搜索、筛选、批量操作所有题目</p>
+      <div>
+        <h2>题库管理</h2>
+        <p class="subtitle">浏览、搜索、筛选、批量操作所有题目</p>
+      </div>
+      <el-button @click="$router.push('/basket')">
+        <el-icon><ShoppingCart /></el-icon> 选题池 ({{ basketTotal }})
+      </el-button>
     </div>
 
     <!-- Search & Filters -->
@@ -78,6 +83,7 @@
       <el-button type="warning" size="small" @click="batchAICorrect">AI 批量修正</el-button>
       <el-button type="info" size="small" @click="showTagDialog = true">批量打标签</el-button>
       <el-button type="warning" size="small" @click="batchAITag">AI 批量打标</el-button>
+      <el-button type="primary" size="small" @click="addToBasket">加入选题池</el-button>
       <el-button type="danger" size="small" @click="batchDelete">批量删除</el-button>
       <el-button text size="small" @click="selectedIds.clear()">取消选择</el-button>
     </div>
@@ -502,6 +508,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 50
 const selectedIds = reactive(new Set())
+const basketTotal = ref(0)
 const showDetail = ref(false)
 const detailQuestion = ref(null)
 const detailPreviewMode = ref(true) // true = preview, false = edit
@@ -1056,16 +1063,40 @@ const doBatchImport = async () => {
   }
 }
 
+// ── Selection basket ──
+
+const loadBasketTotal = async () => {
+  try {
+    const res = await axios.get('/api/basket')
+    basketTotal.value = res.data.total
+  } catch (e) { /* 静默 */ }
+}
+
+const addToBasket = async () => {
+  try {
+    const res = await axios.post('/api/basket/items', { question_ids: [...selectedIds] })
+    if (res.data.added === 0) {
+      ElMessage.warning('所选题目均已在选题池中')
+    } else {
+      ElMessage.success(`已加入选题池 ${res.data.added} 题（池中共 ${res.data.total} 题）`)
+    }
+    basketTotal.value = res.data.total
+  } catch (e) {
+    ElMessage.error('加入选题池失败')
+  }
+}
+
 onMounted(() => {
   loadSources()
   loadTags()
   loadQuestions()
+  loadBasketTotal()
 })
 </script>
 
 <style scoped>
 .library-view { max-width: 1200px; margin: 0 auto; }
-.library-header { margin-bottom: 16px; }
+.library-header { margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-start; }
 .subtitle { color: #909399; margin-top: 4px; }
 .filter-card { margin-bottom: 12px; }
 
