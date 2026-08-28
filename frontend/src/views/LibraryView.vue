@@ -838,8 +838,11 @@ const removeTagFromDetail = async (tagId) => {
       question_ids: [detailQuestion.value.id],
       tag_ids: [tagId],
     })
-    detailQuestion.value.tags = detailQuestion.value.tags?.filter(t => t.id !== tagId) || []
+    // Reload question from backend to ensure data consistency
+    const res = await axios.get(`/api/questions/${detailQuestion.value.id}`)
+    detailQuestion.value.tags = res.data.tags || []
     loadQuestions()
+    ElMessage.success('标签已移除')
   } catch (e) {
     ElMessage.error('移除标签失败')
   }
