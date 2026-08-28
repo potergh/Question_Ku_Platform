@@ -364,3 +364,283 @@ async def correct_question(
         "analysis": analysis,
         "needs_llm": True,
     }
+
+
+# ── Batch correction ─────────────────────────────────────────────────
+
+async def batch_correct_questions(
+    db: AsyncSession,
+    questions: list[dict],
+    custom_prompt: str | None = None,
+) -> list[dict]:
+    """Batch AI correction for multiple questions.
+
+    questions: list of {"id": str, "content": str, "options": list, "answer": str,
+                        "explanation": str, "subject": str, "card_image_path": str}
+    Returns list of corrected dicts.
+
+    Strategy:
+    - Deterministic cleanup + analysis for all
+    - Text-only questions needing LLM → one batched LLM call
+    - Questions with images → individual LLM calls
+    """
+    from app.models.settings import Settings
+    from sqlalchemy import select
+
+    if not questions:
+        return []
+
+    # Get prompt
+    prompt = custom_prompt
+    if not prompt:
+        result = await db.execute(select(Settings).where(Settings.id == 1))
+        settings = result.scalar_one_or_none()
+        prompt = (settings and settings.ai_review_prompt) or DEFAULT_REVIEW_PROMPT
+
+    results = [None] * len(questions)
+
+    # Phase 1: deterministic cleanup + analysis for all
+    cleaned_items = []
+    for i, q in enumerate(questions):
+        cleaned = _deterministic_cleanup(q.get("content") or "")
+        analysis = _analyze_problems(cleaned, q.get("options"))
+        cleaned_items.append({
+            "index": i,
+            "cleaned": cleaned,
+            "analysis": analysis,
+            "q": q,
+        })
+
+    # Phase 2: separate into groups
+    no_llm = []        # don't need LLM
+    text_llm = []      # need LLM, no image
+    image_llm = []     # need LLM, has image
+
+    for item in cleaned_items:
+        if not item["analysis"]["needs_llm"]:
+            no_llm.append(item)
+        else:
+            image_uri = _encode_card_image(item["q"].get("card_image_path"))
+            if image_uri:
+                image_llm.append((item, image_uri))
+            else:
+                text_llm.append(item)
+
+    # Phase 2a: no-LLM items — return as-is
+    for item in no_llm:
+        q = item["q"]
+        results[item["index"]] = {
+            "content": item["cleaned"],
+            "options": q.get("options"),
+            "answer": q.get("answer"),
+            "explanation": q.get("explanation"),
+            "analysis": item["analysis"],
+            "needs_llm": False,
+        }
+
+    # Phase 2b: text-only batch LLM call
+    if text_llm:
+        batch_results = await _batch_text_correction(db, text_llm, prompt)
+        for item, corrected in zip(text_llm, batch_results):
+            results[item["index"]] = corrected
+
+    # Phase 2c: image items — individual LLM calls
+    for item, image_uri in image_llm:
+        q = item["q"]
+        subject_name = _SUBJECT_NAMES.get(q.get("subject"), q.get("subject") or "未知学科")
+        corrected = await _single_image_correction(db, q, item["cleaned"], image_uri, subject_name, prompt)
+        results[item["index"]] = corrected
+
+    return results
+
+
+async def _batch_text_correction(
+    db: AsyncSession,
+    items: list[dict],
+    prompt: str,
+) -> list[dict]:
+    """Send multiple text-only questions in one LLM call."""
+    if not items:
+        return []
+
+    # Build combined prompt
+    q_parts = []
+    for idx, item in enumerate(items):
+        q = item["q"]
+        part = f"=== 题目 {idx + 1} ===\n"
+        part += f"原始内容：\n{item['cleaned']}"
+        if q.get("options"):
+            opt_text = "\n".join(
+                f"{o.get('label', chr(65+i))}. {o.get('content', '')}"
+                for i, o in enumerate(q["options"])
+            )
+            part += f"\n当前选项：\n{opt_text}"
+        if q.get("answer"):
+            part += f"\n当前答案：{q['answer']}"
+        q_parts.append(part)
+
+    all_q_text = "\n\n".join(q_parts)
+    system_msg = f"【批量修正 {len(items)} 道题目】\n\n{prompt}\n\n请返回 JSON 数组，每道题一个对象。"
+
+    messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": all_q_text},
+    ]
+
+    try:
+        response = await _call_llm(db, messages, temperature=0.2, timeout=180)
+    except AIServiceError as e:
+        logger.warning(f"Batch text correction failed: {e}")
+        # Fallback: return cleaned content for each
+        return [{
+            "content": item["cleaned"],
+            "options": item["q"].get("options"),
+            "answer": item["q"].get("answer"),
+            "explanation": item["q"].get("explanation"),
+            "analysis": {**item["analysis"], "error": str(e)},
+            "needs_llm": True,
+        } for item in items]
+
+    # Parse JSON array response
+    try:
+        text = response.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        corrected_list = json.loads(text)
+        if not isinstance(corrected_list, list):
+            corrected_list = [corrected_list]
+    except json.JSONDecodeError:
+        logger.warning(f"Batch correction response not JSON: {response[:300]}")
+        return [{
+            "content": item["cleaned"],
+            "options": item["q"].get("options"),
+            "answer": item["q"].get("answer"),
+            "explanation": item["q"].get("explanation"),
+            "analysis": {**item["analysis"], "error": "AI 返回格式错误"},
+            "needs_llm": True,
+        } for item in items]
+
+    # Match results back
+    results = []
+    for i, item in enumerate(items):
+        q = item["q"]
+        c = corrected_list[i] if i < len(corrected_list) else {}
+        result_content = c.get("content", item["cleaned"])
+        result_options = c.get("options")
+        result_answer = c.get("answer") or q.get("answer")
+        result_explanation = c.get("explanation") or q.get("explanation")
+
+        # Normalize options
+        if result_options and isinstance(result_options, list):
+            normalized = []
+            for j, opt in enumerate(result_options):
+                if isinstance(opt, dict):
+                    normalized.append({"label": opt.get("label", chr(65 + j)), "content": opt.get("content", "")})
+                elif isinstance(opt, str):
+                    normalized.append({"label": chr(65 + j), "content": opt})
+            result_options = normalized
+        else:
+            result_options = q.get("options")
+
+        # Strip options from content
+        if result_options and isinstance(result_options, list):
+            result_content = _strip_options_from_content(result_content, result_options)
+
+        results.append({
+            "content": result_content,
+            "options": result_options,
+            "answer": result_answer,
+            "explanation": result_explanation,
+            "analysis": item["analysis"],
+            "needs_llm": True,
+        })
+
+    return results
+
+
+async def _single_image_correction(
+    db: AsyncSession,
+    q: dict,
+    cleaned: str,
+    image_uri: str,
+    subject_name: str,
+    prompt: str,
+) -> dict:
+    """Correct a single question that has an image."""
+    system_msg = f"【当前学科：{subject_name}】\n\n{prompt}"
+
+    user_content = [
+        {"type": "image_url", "image_url": {"url": image_uri}},
+    ]
+
+    text_parts = [f"原始 OCR 内容：\n{cleaned}"]
+    if q.get("options"):
+        opt_text = "\n".join(
+            f"{o.get('label', chr(65+i))}. {o.get('content', '')}"
+            for i, o in enumerate(q["options"])
+        )
+        text_parts.append(f"\n当前选项：\n{opt_text}")
+    if q.get("answer"):
+        text_parts.append(f"\n当前答案：{q['answer']}")
+    user_content.append({"type": "text", "text": "\n".join(text_parts)})
+
+    messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": user_content},
+    ]
+
+    try:
+        response = await _call_llm(db, messages, temperature=0.2, timeout=120)
+    except AIServiceError as e:
+        logger.warning(f"Image correction failed: {e}")
+        return {
+            "content": cleaned,
+            "options": q.get("options"),
+            "answer": q.get("answer"),
+            "explanation": q.get("explanation"),
+            "analysis": {"error": str(e)},
+            "needs_llm": True,
+        }
+
+    try:
+        text = response.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+        corrected = json.loads(text)
+    except json.JSONDecodeError:
+        return {
+            "content": cleaned,
+            "options": q.get("options"),
+            "answer": q.get("answer"),
+            "explanation": q.get("explanation"),
+            "analysis": {"error": "AI 返回格式错误"},
+            "needs_llm": True,
+        }
+
+    result_content = corrected.get("content", cleaned)
+    result_options = corrected.get("options")
+    result_answer = corrected.get("answer") or q.get("answer")
+    result_explanation = corrected.get("explanation") or q.get("explanation")
+
+    if result_options and isinstance(result_options, list):
+        normalized = []
+        for j, opt in enumerate(result_options):
+            if isinstance(opt, dict):
+                normalized.append({"label": opt.get("label", chr(65 + j)), "content": opt.get("content", "")})
+            elif isinstance(opt, str):
+                normalized.append({"label": chr(65 + j), "content": opt})
+        result_options = normalized
+    else:
+        result_options = q.get("options")
+
+    if result_options and isinstance(result_options, list):
+        result_content = _strip_options_from_content(result_content, result_options)
+
+    return {
+        "content": result_content,
+        "options": result_options,
+        "answer": result_answer,
+        "explanation": result_explanation,
+        "analysis": {},
+        "needs_llm": True,
+    }

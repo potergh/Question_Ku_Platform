@@ -301,3 +301,97 @@ async def auto_tag_question(
         "question_type": suggestions.get("question_type"),
         "confidence": suggestions.get("confidence", 0.5),
     }
+
+
+async def auto_tag_questions_batch(
+    db: AsyncSession,
+    questions: list[dict],
+) -> list[dict]:
+    """
+    Batch AI auto-tagging for multiple questions in one LLM call.
+    questions: list of {"id": str, "content": str, "options": list, "answer": str}
+    Returns list of {"id": str, "tag_ids": [...], "difficulty": int, "question_type": str, "confidence": float}
+    """
+    from app.models import Tag
+
+    if not questions:
+        return []
+
+    # Get available tags
+    result = await db.execute(select(Tag).order_by(Tag.category, Tag.name))
+    tags = result.scalars().all()
+    if not tags:
+        return [{"id": q["id"], "tag_ids": [], "difficulty": None, "question_type": None, "confidence": 0} for q in questions]
+
+    tag_text = "\n".join([f"ID:{t.id} | {t.category} | {t.name}" for t in tags[:80]])
+
+    # Build all questions summary
+    q_summaries = []
+    for i, q in enumerate(questions):
+        summary = f"--- 题目 {i+1} (ID: {q['id']}) ---\n"
+        summary += (q.get("content") or "")[:200]
+        if q.get("options"):
+            opts = [f"{o.get('label','')}. {o.get('content','')}" for o in q["options"][:6]]
+            summary += "\n选项: " + "; ".join(opts)
+        if q.get("answer"):
+            summary += f"\n答案: {(q['answer'] or '')[:80]}"
+        q_summaries.append(summary)
+
+    all_q_text = "\n\n".join(q_summaries)
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是一位教学专家。分析多道题目并返回 JSON 数组格式的标注建议。\n"
+                "返回格式：[{\"id\": \"题目ID\", \"tag_ids\": [\"id1\", \"id2\"], \"difficulty\": 1-5, \"question_type\": \"选择题/填空题/解答题/计算题/实验题\", \"confidence\": 0-1}, ...]\n"
+                "tag_ids 必须从可用标签中选择，每题最多选 3 个。只返回 JSON 数组，不要其他文字。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"可用标签：\n{tag_text}\n\n"
+                f"题目列表：\n{all_q_text}\n\n"
+                f"共 {len(questions)} 道题，请逐一分析并返回标注建议数组。"
+            ),
+        },
+    ]
+
+    response_text = await _call_llm(db, messages, temperature=0.3, timeout=120)
+
+    # Parse JSON array response
+    try:
+        text = response_text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        suggestions_list = json.loads(text)
+        if not isinstance(suggestions_list, list):
+            suggestions_list = [suggestions_list]
+    except json.JSONDecodeError:
+        logger.warning(f"AI batch auto_tag response not JSON: {response_text[:300]}")
+        return [{"id": q["id"], "tag_ids": [], "difficulty": None, "question_type": None, "confidence": 0} for q in questions]
+
+    # Map results by ID
+    results_map = {}
+    valid_tag_ids = {t.id for t in tags}
+    for s in suggestions_list:
+        qid = s.get("id", "")
+        suggested_ids = [tid for tid in s.get("tag_ids", []) if tid in valid_tag_ids][:3]
+        results_map[qid] = {
+            "id": qid,
+            "tag_ids": suggested_ids,
+            "difficulty": s.get("difficulty"),
+            "question_type": s.get("question_type"),
+            "confidence": s.get("confidence", 0.5),
+        }
+
+    # Ensure all questions have a result
+    results = []
+    for q in questions:
+        if q["id"] in results_map:
+            results.append(results_map[q["id"]])
+        else:
+            results.append({"id": q["id"], "tag_ids": [], "difficulty": None, "question_type": None, "confidence": 0})
+
+    return results

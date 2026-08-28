@@ -317,36 +317,47 @@ async def batch_ai_correct(
     question_ids: list[str] = Body(..., embed=True),
     db: AsyncSession = Depends(get_db),
 ):
-    """AI-correct multiple questions. Returns results for user review."""
-    from app.services.ai_correct import correct_question
+    """AI-correct multiple questions in batch. Text-only questions are batched into one LLM call."""
+    from app.services.ai_correct import batch_correct_questions
 
-    results = []
+    # Collect question data
+    questions_data = []
     for qid in question_ids:
         result = await db.execute(
             select(Question).where(Question.id == qid, Question.is_deleted == False)
         )
         question = result.scalar_one_or_none()
         if not question:
-            results.append({"question_id": qid, "error": "未找到"})
+            questions_data.append(None)
             continue
+        questions_data.append({
+            "id": qid,
+            "content": question.raw_ocr_content or question.content or "",
+            "options": question.options,
+            "answer": question.answer,
+            "explanation": question.explanation,
+            "subject": question.subject,
+            "card_image_path": question.card_image_path,
+        })
 
-        try:
-            corrected = await correct_question(
-                db=db,
-                content=question.raw_ocr_content or question.content or "",
-                options=question.options,
-                answer=question.answer,
-                explanation=question.explanation,
-                subject=question.subject,
-                card_image_path=question.card_image_path,
-            )
-            results.append({
-                "question_id": qid,
-                "question_number": question.question_number,
-                **corrected,
-            })
-        except Exception as e:
-            results.append({"question_id": qid, "error": str(e)})
+    # Filter out None (not found)
+    valid_questions = [q for q in questions_data if q is not None]
+
+    if not valid_questions:
+        return {"ok": True, "results": [{"question_id": qid, "error": "未找到"} for qid in question_ids]}
+
+    try:
+        corrected_list = await batch_correct_questions(db, valid_questions)
+    except Exception as e:
+        return {"ok": True, "results": [{"question_id": q["id"], "error": str(e)} for q in valid_questions]}
+
+    results = []
+    for q, corrected in zip(valid_questions, corrected_list):
+        results.append({
+            "question_id": q["id"],
+            "question_number": q.get("question_number"),
+            **corrected,
+        })
 
     return {"ok": True, "results": results}
 
@@ -356,45 +367,59 @@ async def batch_ai_tag(
     question_ids: list[str] = Body(..., embed=True),
     db: AsyncSession = Depends(get_db),
 ):
-    """Re-run AI auto-tagging on existing questions."""
-    from app.services.ai_service import auto_tag_question, AIServiceError
+    """Batch AI auto-tagging — sends all questions in one LLM call."""
+    from app.services.ai_service import auto_tag_questions_batch, AIServiceError
 
-    tagged = 0
-    errors = 0
+    # Collect questions data
+    questions_data = []
+    question_objs = {}
     for qid in question_ids:
         question = await db.get(Question, qid)
         if not question or question.is_deleted:
             continue
-        try:
-            suggestions = await auto_tag_question(
-                db, question.content, question.options, question.answer
-            )
-            question.ai_suggestions = suggestions
+        questions_data.append({
+            "id": qid,
+            "content": question.content or "",
+            "options": question.options,
+            "answer": question.answer,
+        })
+        question_objs[qid] = question
 
-            # Apply tags if confidence >= 0.5
-            if suggestions.get("confidence", 0) >= 0.5 and suggestions.get("tag_ids"):
-                for tid in suggestions["tag_ids"]:
-                    tag = await db.get(Tag, tid)
-                    if tag and tag not in question.tags:
-                        question.tags.append(tag)
+    if not questions_data:
+        return {"ok": True, "tagged": 0, "errors": 0}
 
-            # Apply question_type if not set
-            ai_qtype = suggestions.get("question_type")
-            if ai_qtype and not question.question_type:
-                for eng, chn in QUESTION_TYPE_MAP.items():
-                    if chn == ai_qtype:
-                        question.question_type = eng
-                        break
-                else:
-                    question.question_type = ai_qtype
+    try:
+        results = await auto_tag_questions_batch(db, questions_data)
+    except AIServiceError as e:
+        raise HTTPException(503, f"AI service unavailable: {e}")
 
-            tagged += 1
-        except AIServiceError:
-            break
-        except Exception as e:
-            errors += 1
-            import logging
-            logging.getLogger(__name__).warning(f"AI tagging failed for {qid}: {e}")
+    tagged = 0
+    for r in results:
+        qid = r.get("id")
+        question = question_objs.get(qid)
+        if not question:
+            continue
+
+        question.ai_suggestions = r
+
+        # Apply tags if confidence >= 0.5
+        if r.get("confidence", 0) >= 0.5 and r.get("tag_ids"):
+            for tid in r["tag_ids"]:
+                tag = await db.get(Tag, tid)
+                if tag and tag not in question.tags:
+                    question.tags.append(tag)
+
+        # Apply question_type if not set
+        ai_qtype = r.get("question_type")
+        if ai_qtype and not question.question_type:
+            for eng, chn in QUESTION_TYPE_MAP.items():
+                if chn == ai_qtype:
+                    question.question_type = eng
+                    break
+            else:
+                question.question_type = ai_qtype
+
+        tagged += 1
 
     await db.commit()
-    return {"ok": True, "tagged": tagged, "errors": errors}
+    return {"ok": True, "tagged": tagged, "errors": 0}
