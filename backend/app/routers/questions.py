@@ -209,9 +209,16 @@ async def batch_tag(
     db: AsyncSession = Depends(get_db),
 ):
     """Add tags to multiple questions."""
+    from sqlalchemy.orm import selectinload
+
     for qid in question_ids:
-        question = await db.get(Question, qid)
-        if not question or question.is_deleted:
+        result = await db.execute(
+            select(Question)
+            .options(selectinload(Question.tags))
+            .where(Question.id == qid, Question.is_deleted == False)
+        )
+        question = result.scalar_one_or_none()
+        if not question:
             continue
         for tid in tag_ids:
             tag = await db.get(Tag, tid)
@@ -228,10 +235,18 @@ async def batch_untag(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove tags from multiple questions."""
+    from sqlalchemy.orm import selectinload
+
     for qid in question_ids:
-        question = await db.get(Question, qid)
-        if not question or question.is_deleted:
+        result = await db.execute(
+            select(Question)
+            .options(selectinload(Question.tags))
+            .where(Question.id == qid, Question.is_deleted == False)
+        )
+        question = result.scalar_one_or_none()
+        if not question:
             continue
+        # Remove specified tags
         question.tags = [t for t in question.tags if t.id not in tag_ids]
     await db.commit()
     return {"ok": True}
