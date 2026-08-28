@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.database import Base
 from app.models import Source, Question, Tag, Settings, Job, SelectionBasket, SelectionBasketItem
+from app.models import Practice, PracticeSection, PracticeQuestion, PracticeContentBlock
 
 
 # Use a separate in-memory DB for tests
@@ -202,4 +203,36 @@ async def test_basket_item_unique(db: AsyncSession):
     db.add(dup)
     with pytest.raises(Exception):
         await db.commit()
+
+
+# ── Practice cascade ───────────────────────────────────
+
+async def test_practice_cascade_delete(db: AsyncSession):
+    practice = Practice(title="浮力练习", subject="物理")
+    db.add(practice)
+    await db.flush()
+
+    section = PracticeSection(practice_id=practice.id, title="选择题", section_type="选择题", position=0)
+    db.add(section)
+    await db.flush()
+
+    pq = PracticeQuestion(
+        practice_id=practice.id, section_id=section.id,
+        source_question_id="q-xyz", position=0,
+        question_type="single_choice", content_snapshot="题干 ![图](asset://practice/ab.webp)",
+        options_snapshot=[{"label": "A", "content": "1"}],
+    )
+    db.add(pq)
+    await db.flush()
+
+    block = PracticeContentBlock(practice_question_id=pq.id, block_type="text", position=0, content="题干")
+    db.add(block)
+    await db.commit()
+
+    await db.delete(practice)
+    await db.commit()
+
+    for model in (PracticeSection, PracticeQuestion, PracticeContentBlock):
+        result = await db.execute(select(model))
+        assert result.scalars().first() is None
 

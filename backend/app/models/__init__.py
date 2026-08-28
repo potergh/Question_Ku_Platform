@@ -6,6 +6,12 @@ from app.models.tag import Tag, question_tags
 from app.models.settings import Settings
 from app.models.job import Job
 from app.models.basket import SelectionBasket, SelectionBasketItem
+from app.models.practice import (
+    Practice,
+    PracticeSection,
+    PracticeQuestion,
+    PracticeContentBlock,
+)
 
 __all__ = [
     "Source",
@@ -16,4 +22,8 @@ __all__ = [
     "Job",
     "SelectionBasket",
     "SelectionBasketItem",
+    "Practice",
+    "PracticeSection",
+    "PracticeQuestion",
+    "PracticeContentBlock",
 ]
