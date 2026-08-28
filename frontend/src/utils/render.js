@@ -34,9 +34,18 @@ function processLatex(text) {
     return renderLatex(tex.trim(), true)
   })
 
+  // Block math: \[...\]
+  text = text.replace(/\\\[([\s\S]+?)\\\]/g, (_, tex) => {
+    return renderLatex(tex.trim(), true)
+  })
+
   // Inline math: $...$  (but not \$ escaped)
-  // Match $ that is not preceded by backslash, content without $ or newlines, closing $
   text = text.replace(/(?<!\\)\$(?!\$)([^\$\n]+?)\$/g, (_, tex) => {
+    return renderLatex(tex.trim(), false)
+  })
+
+  // Inline math: \(...\)
+  text = text.replace(/\\\(([\s\S]+?)\\\)/g, (_, tex) => {
     return renderLatex(tex.trim(), false)
   })
 

@@ -519,12 +519,10 @@ const acceptAICorrection = async () => {
   if (!aiPreviewData.value || !detailQuestion.value) return
   const d = aiPreviewData.value
   const q = detailQuestion.value
-  // Apply corrected content to the detail question
   q.content = d.content
   if (d.options && d.options.length > 0) q.options = d.options
   if (d.answer) q.answer = d.answer
   if (d.explanation) q.explanation = d.explanation
-  // Save to backend
   try {
     await axios.put(`/api/questions/${q.id}`, {
       content: q.content,
@@ -535,7 +533,6 @@ const acceptAICorrection = async () => {
     ElMessage.success('已应用 AI 修正')
     showAIPreview.value = false
     loadQuestions()
-    // Refresh detail view
     const res2 = await axios.get(`/api/questions/${q.id}`)
     detailQuestion.value = res2.data
   } catch (e) {
@@ -568,7 +565,6 @@ const batchAICorrect = async () => {
     try {
       const res = await axios.post(`/api/questions/${ids[i]}/ai-correct`)
       results.push({ question_id: ids[i], ...res.data })
-      // Auto-apply if AI made corrections
       if (res.data.needs_llm && res.data.content) {
         await axios.put(`/api/questions/${ids[i]}`, {
           content: res.data.content,

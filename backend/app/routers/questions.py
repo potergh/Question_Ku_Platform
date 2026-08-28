@@ -292,7 +292,8 @@ async def ai_correct_question(
 
     corrected = await correct_question(
         db=db,
-        content=question.content or question.raw_ocr_content or "",
+        # Prefer raw_ocr_content (original) over content (may have been modified)
+        content=question.raw_ocr_content or question.content or "",
         options=question.options,
         answer=question.answer,
         explanation=question.explanation,
@@ -324,7 +325,7 @@ async def batch_ai_correct(
         try:
             corrected = await correct_question(
                 db=db,
-                content=question.content or question.raw_ocr_content or "",
+                content=question.raw_ocr_content or question.content or "",
                 options=question.options,
                 answer=question.answer,
                 explanation=question.explanation,

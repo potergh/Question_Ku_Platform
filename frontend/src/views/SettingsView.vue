@@ -60,7 +60,7 @@
               v-model="form.ai_review_prompt"
               type="textarea"
               :autosize="{ minRows: 3, maxRows: 10 }"
-              placeholder="留空使用默认 Prompt。可自定义 AI 修正指令，支持学科变量 {学科}"
+              placeholder="留空使用默认 Prompt。可自定义 AI 修正指令"
             />
             <div class="form-hint">AI 修正题目时使用的系统提示词，留空使用默认模板</div>
           </el-form-item>
