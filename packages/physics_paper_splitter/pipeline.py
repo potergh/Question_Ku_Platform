@@ -12,6 +12,7 @@ from .figures import FigureExtractor
 from .inspector import PDFInspector
 from .ocr import QuestionTextPipeline
 from .quality import CompletenessValidator
+from .scan import ensure_text_layer
 from .splitter import QuestionSplitter
 
 
@@ -25,7 +26,6 @@ class SplitPipeline:
         self.completeness = CompletenessValidator()
 
     def process(self, pdf_path: Path, output_root: Path, document_name: str | None = None) -> dict:
-        inspection = self.inspector.inspect(pdf_path)
         document_name = document_name or pdf_path.stem
         if not document_name or Path(document_name).name != document_name:
             raise ValueError(f"非法输出目录名：{document_name!r}")
@@ -39,7 +39,13 @@ class SplitPipeline:
             if generated_dir.exists():
                 shutil.rmtree(generated_dir)
 
-        with fitz.open(pdf_path) as doc:
+        # 扫描件没有文字层，先整页 OCR 补一层隐形文字，后续流程不变。
+        effective_pdf = ensure_text_layer(
+            pdf_path, document_dir / "_ocr_layer.pdf", self.text_pipeline.engine
+        )
+        inspection = self.inspector.inspect(effective_pdf)
+
+        with fitz.open(effective_pdf) as doc:
             anchors = self.splitter.find_anchors(doc, inspection)
             records = self.splitter.build_records(doc, inspection, anchors)
             for record in records:

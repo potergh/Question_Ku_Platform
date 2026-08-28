@@ -8,8 +8,9 @@ from .models import CropSegment, DocumentInspection, QuestionAnchor, QuestionRec
 
 
 # 必须带题号标点；分值部分可选，以兼容少数只写“14．”的试卷。
+# 扫描件文字层的题号分隔符常被 OCR 误识为 ：、，、，一并接受。
 ANCHOR_RE = re.compile(
-    r"^\s*(?:[（(]\s*多选\s*[）)])?\s*(\d{1,2})\s*(?:[．、]|\.(?!\d))\s*"
+    r"^\s*(?:[（(]\s*多选\s*[）)])?\s*(\d{1,2})\s*(?:[．、：，,]|\.(?!\d))\s*"
     r"(?:[（(]\s*\d+\s*分\s*[）)])?"
 )
 HEADER_RE = re.compile(r"^\s*第\s*\d+\s*页")

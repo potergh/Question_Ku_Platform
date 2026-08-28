@@ -15,19 +15,25 @@ class RapidOCREngine:
             raise RuntimeError("未安装 rapidocr_onnxruntime，请安装 OCR 可选依赖。") from exc
         self._engine = RapidOCR()
 
-    def recognize(self, image_path: Path) -> tuple[str, float]:
+    def recognize_lines(self, image_path: Path) -> list[tuple[list, str, float]]:
+        """识别图片，返回带坐标的行级结果 [(四角框像素坐标, 文字, 置信度)]。"""
         result, _elapsed = self._engine(str(image_path))
+        lines: list[tuple[list, str, float]] = []
         if not result:
-            return "", 0.0
-        lines: list[str] = []
-        scores: list[float] = []
+            return lines
         for item in result:
             if len(item) < 3:
                 continue
-            lines.append(str(item[1]))
-            scores.append(float(item[2]))
-        confidence = sum(scores) / len(scores) if scores else 0.0
-        return "\n".join(lines), round(confidence, 4)
+            lines.append((item[0], str(item[1]), float(item[2])))
+        return lines
+
+    def recognize(self, image_path: Path) -> tuple[str, float]:
+        lines = self.recognize_lines(image_path)
+        if not lines:
+            return "", 0.0
+        text_lines = [item[1] for item in lines]
+        confidence = sum(item[2] for item in lines) / len(lines)
+        return "\n".join(text_lines), round(confidence, 4)
 
 
 class PaddleOCREngine:
@@ -48,21 +54,25 @@ class PaddleOCREngine:
         # lang="ch" 启用中英混合模型
         self._engine = PaddleOCR(use_angle_cls=True, lang="ch")
 
-    def recognize(self, image_path: Path) -> tuple[str, float]:
+    def recognize_lines(self, image_path: Path) -> list[tuple[list, str, float]]:
+        """识别图片，返回带坐标的行级结果 [(四角框像素坐标, 文字, 置信度)]。"""
         result = self._engine.ocr(str(image_path), cls=True)
+        lines: list[tuple[list, str, float]] = []
         if not result or not result[0]:
-            return "", 0.0
-        lines: list[str] = []
-        scores: list[float] = []
+            return lines
         for line_group in result[0]:
             if len(line_group) < 2:
                 continue
-            text = str(line_group[1][0])
-            conf = float(line_group[1][1])
-            lines.append(text)
-            scores.append(conf)
-        confidence = sum(scores) / len(scores) if scores else 0.0
-        return "\n".join(lines), round(confidence, 4)
+            lines.append((line_group[0], str(line_group[1][0]), float(line_group[1][1])))
+        return lines
+
+    def recognize(self, image_path: Path) -> tuple[str, float]:
+        lines = self.recognize_lines(image_path)
+        if not lines:
+            return "", 0.0
+        text_lines = [item[1] for item in lines]
+        confidence = sum(item[2] for item in lines) / len(lines)
+        return "\n".join(text_lines), round(confidence, 4)
 
 
 def load_ocr_engine(mode: str):
