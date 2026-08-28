@@ -1,9 +1,10 @@
 """Pydantic schemas for Question."""
 
 from datetime import datetime
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, Field
 
 from app.routers.upload import resolve_asset_urls, resolve_card_image_path
+from app.utils.question_types import QUESTION_TYPE_MAP
 
 
 class TagBrief(BaseModel):
@@ -22,6 +23,7 @@ class QuestionResponse(BaseModel):
     source_question_id: str
     question_number: int
     question_type: str | None
+    question_type_zh: str | None = Field(default=None, description="Chinese question type")
     subject: str | None
     difficulty: int | None
     grade: str | None
@@ -49,6 +51,9 @@ class QuestionResponse(BaseModel):
                 self.content = resolve_asset_urls(self.content, self.source_id)
             if self.card_image_path and ('\\' in (self.card_image_path or '') or self.card_image_path.startswith('/')):
                 self.card_image_path = resolve_card_image_path(self.card_image_path, self.source_id)
+        # Map question type to Chinese
+        if self.question_type:
+            self.question_type_zh = QUESTION_TYPE_MAP.get(self.question_type, self.question_type)
         return self
 
 

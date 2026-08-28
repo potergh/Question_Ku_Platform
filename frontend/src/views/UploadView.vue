@@ -14,6 +14,7 @@
         :on-error="onUploadError"
         :show-file-list="false"
         :disabled="uploading"
+        :multiple="true"
       >
         <el-icon class="upload-icon"><Upload /></el-icon>
         <div class="upload-text">
@@ -21,7 +22,7 @@
         </div>
         <template #tip>
           <div class="upload-tip">
-            支持 PDF / DOCX / PPTX / TXT 格式
+            支持 PDF / DOCX / PPTX / TXT 格式，可多文件批量上传
             <el-select
               v-model="selectedSubject"
               placeholder="选择学科（可选）"
@@ -39,14 +40,44 @@
       </el-upload>
     </el-card>
 
-    <!-- Processing Queue — active jobs with progress -->
+    <!-- Pending Uploads (confirmation queue) -->
+    <el-card class="queue-card" v-if="pendingFiles.length > 0">
+      <template #header>
+        <div class="card-header">
+          <span>待上传文件 ({{ pendingFiles.length }})</span>
+          <div>
+            <el-button text type="danger" size="small" @click="pendingFiles = []">
+              <el-icon><Delete /></el-icon> 清空
+            </el-button>
+            <el-button type="primary" size="small" @click="uploadPending" :loading="uploading">
+              <el-icon><Upload /></el-icon> 开始上传
+            </el-button>
+          </div>
+        </div>
+      </template>
+      <div v-for="(file, idx) in pendingFiles" :key="idx" class="pending-item">
+        <el-icon style="color: #409eff;"><Document /></el-icon>
+        <span class="pending-name">{{ file.name }}</span>
+        <span class="pending-size">{{ formatSize(file.size) }}</span>
+        <el-button text type="danger" size="small" @click="pendingFiles.splice(idx, 1)">
+          <el-icon><Close /></el-icon>
+        </el-button>
+      </div>
+    </el-card>
+
+    <!-- Processing Queue -->
     <el-card class="queue-card" v-if="activeJobs.length > 0">
       <template #header>
         <div class="card-header">
           <span>处理队列</span>
-          <el-button text @click="refreshJobs">
-            <el-icon><Refresh /></el-icon> 刷新
-          </el-button>
+          <div>
+            <el-button text @click="refreshJobs">
+              <el-icon><Refresh /></el-icon> 刷新
+            </el-button>
+            <el-button text type="danger" @click="clearCompletedJobs" :loading="clearingJobs">
+              <el-icon><Delete /></el-icon> 清除已完成
+            </el-button>
+          </div>
         </div>
       </template>
       <div v-for="job in activeJobs" :key="job.id" class="job-item">
@@ -85,9 +116,21 @@
       <template #header>
         <div class="card-header">
           <span>已上传试卷</span>
+          <div>
+            <el-button 
+              v-if="selectedSourceIds.size > 0" 
+              text 
+              type="danger" 
+              size="small" 
+              @click="batchDeleteSources"
+            >
+              <el-icon><Delete /></el-icon> 批量删除 ({{ selectedSourceIds.size }})
+            </el-button>
+          </div>
         </div>
       </template>
-      <el-table :data="sources" stripe>
+      <el-table :data="sources" stripe @selection-change="onSourceSelectionChange">
+        <el-table-column type="selection" width="40" />
         <el-table-column prop="filename" label="文件名" />
         <el-table-column prop="subject" label="学科" width="100">
           <template #default="{ row }">
@@ -107,7 +150,7 @@
             {{ formatTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="140">
+        <el-table-column label="操作" width="180">
           <template #default="{ row }">
             <el-button
               v-if="row.ocr_status === 'error'"
@@ -118,8 +161,17 @@
             >
               重试
             </el-button>
-            <el-button text type="primary" size="small" @click="goToLibrary(row.id)">
+            <el-button 
+              v-if="row.ocr_status === 'done'"
+              text 
+              type="primary" 
+              size="small" 
+              @click="goToLibrary(row.id)"
+            >
               查看
+            </el-button>
+            <el-button text type="danger" size="small" @click="deleteSource(row.id)">
+              删除
             </el-button>
           </template>
         </el-table-column>
@@ -131,7 +183,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 
 const router = useRouter()
@@ -139,13 +191,57 @@ const selectedSubject = ref('physics')
 const uploading = ref(false)
 const sources = ref([])
 const jobs = ref([])
+const pendingFiles = ref([])
+const selectedSourceIds = ref(new Set())
+const clearingJobs = ref(false)
 
 const beforeUpload = (file) => {
+  // Add to pending list instead of immediate upload
+  pendingFiles.value.push(file)
+  return false // Prevent auto-upload
+}
+
+const uploadPending = async () => {
+  if (pendingFiles.value.length === 0) return
+  
   uploading.value = true
-  return true
+  const files = [...pendingFiles.value]
+  pendingFiles.value = []
+  
+  let successCount = 0
+  let failCount = 0
+  
+  for (const file of files) {
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('subject', selectedSubject.value)
+      
+      await axios.post('/api/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      successCount++
+    } catch (e) {
+      failCount++
+      console.error(`Failed to upload ${file.name}:`, e)
+    }
+  }
+  
+  uploading.value = false
+  
+  if (successCount > 0) {
+    ElMessage.success(`成功上传 ${successCount} 个文件，开始 OCR 处理`)
+  }
+  if (failCount > 0) {
+    ElMessage.error(`${failCount} 个文件上传失败`)
+  }
+  
+  loadSources()
+  startPolling()
 }
 
 const onUploadSuccess = (response) => {
+  // Legacy handler for single file upload
   uploading.value = false
   ElMessage.success(`上传成功，开始 OCR 处理`)
   loadSources()
@@ -214,6 +310,20 @@ const refreshJobs = () => {
   loadJobs()
 }
 
+const clearCompletedJobs = async () => {
+  try {
+    await ElMessageBox.confirm('确定清除所有已完成和失败的任务记录？', '提示')
+    clearingJobs.value = true
+    await axios.post('/api/jobs/clear-failed')
+    ElMessage.success('已清除')
+    loadJobs()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('操作失败')
+  } finally {
+    clearingJobs.value = false
+  }
+}
+
 const retrySource = async (sourceId) => {
   try {
     await axios.post(`/api/sources/${sourceId}/retry`)
@@ -222,6 +332,33 @@ const retrySource = async (sourceId) => {
     startPolling()
   } catch (e) {
     ElMessage.error('重试失败: ' + (e.response?.data?.detail || e.message))
+  }
+}
+
+const deleteSource = async (sourceId) => {
+  try {
+    await ElMessageBox.confirm('确定删除此试卷？相关题目和文件将被永久删除。', '警告', { type: 'warning' })
+    await axios.delete(`/api/sources/${sourceId}`)
+    ElMessage.success('已删除')
+    loadSources()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('删除失败')
+  }
+}
+
+const onSourceSelectionChange = (selection) => {
+  selectedSourceIds.value = new Set(selection.map(s => s.id))
+}
+
+const batchDeleteSources = async () => {
+  try {
+    await ElMessageBox.confirm(`确定删除选中的 ${selectedSourceIds.value.size} 个试卷？`, '警告', { type: 'warning' })
+    await axios.post('/api/sources/batch-delete', { source_ids: [...selectedSourceIds.value] })
+    ElMessage.success('批量删除成功')
+    selectedSourceIds.value.clear()
+    loadSources()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('操作失败')
   }
 }
 
@@ -249,6 +386,12 @@ const formatTime = (dt) => {
   return new Date(dt).toLocaleString('zh-CN')
 }
 
+const formatSize = (bytes) => {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
 onMounted(() => {
   loadSources()
   loadJobs()
@@ -268,7 +411,7 @@ onUnmounted(() => {
 
 <style scoped>
 .upload-view {
-  max-width: 800px;
+  max-width: 900px;
   margin: 0 auto;
 }
 
@@ -314,6 +457,29 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.pending-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.pending-item:last-child {
+  border-bottom: none;
+}
+
+.pending-name {
+  flex: 1;
+  font-weight: 500;
+  color: #303133;
+}
+
+.pending-size {
+  color: #909399;
+  font-size: 13px;
 }
 
 .job-item {

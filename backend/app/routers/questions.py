@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models import Question, Source, Tag, question_tags
 from app.schemas.question import QuestionResponse, QuestionUpdate, QuestionListResponse
+from app.utils.question_types import QUESTION_TYPE_MAP
 
 router = APIRouter()
 
@@ -37,7 +38,13 @@ async def list_questions(
     if review_status:
         query = query.where(Question.review_status == review_status)
     if question_type:
-        query = query.where(Question.question_type == question_type)
+        # Support both English and Chinese question types
+        # If Chinese, find matching English types
+        en_types = [k for k, v in QUESTION_TYPE_MAP.items() if v == question_type]
+        if en_types:
+            query = query.where(Question.question_type.in_(en_types))
+        else:
+            query = query.where(Question.question_type == question_type)
     if subject:
         query = query.where(Question.subject == subject)
     if difficulty is not None:

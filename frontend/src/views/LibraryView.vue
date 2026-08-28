@@ -21,9 +21,7 @@
         </el-col>
         <el-col :span="3">
           <el-select v-model="filters.subject" placeholder="学科" clearable @change="loadQuestions">
-            <el-option label="物理" value="physics" />
-            <el-option label="数学" value="math" />
-            <el-option label="化学" value="chemistry" />
+            <el-option v-for="s in availableSubjects" :key="s.value" :label="s.label" :value="s.value" />
           </el-select>
         </el-col>
         <el-col :span="3">
@@ -48,7 +46,7 @@
         </el-col>
         <el-col :span="3">
           <el-select v-model="filters.source_id" placeholder="试卷" clearable @change="loadQuestions">
-            <el-option v-for="s in sources" :key="s.id" :label="s.filename" :value="s.id" />
+            <el-option v-for="s in doneSources" :key="s.id" :label="s.filename" :value="s.id" />
           </el-select>
         </el-col>
         <el-col :span="3" style="text-align: right;">
@@ -66,6 +64,18 @@
       <el-button type="danger" size="small" @click="batchDelete">批量删除</el-button>
       <el-button text size="small" @click="selectedIds.clear()">取消选择</el-button>
     </div>
+    
+    <!-- Select All Bar -->
+    <div class="select-all-bar" v-if="questions.length > 0">
+      <el-checkbox 
+        :model-value="allSelected" 
+        @change="toggleSelectAll"
+        :indeterminate="someSelected"
+      >
+        全选当前页 ({{ questions.length }} 题)
+      </el-checkbox>
+      <span class="total-count">共 {{ total }} 题</span>
+    </div>
 
     <!-- Question Cards Grid -->
     <div class="question-grid" v-if="questions.length > 0">
@@ -82,7 +92,7 @@
             @click.stop="toggleSelect(q.id)"
           />
           <span class="q-num">#{{ q.question_number }}</span>
-          <el-tag v-if="q.question_type" size="small" type="info">{{ q.question_type }}</el-tag>
+          <el-tag v-if="q.question_type" size="small" type="info">{{ q.question_type_zh || q.question_type }}</el-tag>
           <el-tag
             :type="reviewTagType(q.review_status)"
             size="small"
@@ -211,7 +221,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import { renderFullContent, renderPreview } from '../utils/render.js'
@@ -238,6 +248,48 @@ const filters = reactive({
   difficulty: null,
   source_id: '',
 })
+
+// Dynamic subjects from API
+const availableSubjects = computed(() => {
+  const subjects = [
+    { value: 'physics', label: '物理' },
+    { value: 'math', label: '数学' },
+    { value: 'chemistry', label: '化学' },
+    { value: 'english', label: '英语' },
+    { value: 'chinese', label: '语文' },
+  ]
+  // Add any additional subjects from sources
+  const sourceSubjects = new Set(sources.value.filter(s => s.ocr_status === 'done' && s.subject).map(s => s.subject))
+  for (const subj of sourceSubjects) {
+    if (!subjects.find(s => s.value === subj)) {
+      subjects.push({ value: subj, label: subj })
+    }
+  }
+  return subjects
+})
+
+// Only show sources with OCR done
+const doneSources = computed(() => {
+  return sources.value.filter(s => s.ocr_status === 'done')
+})
+
+// Select all functionality
+const allSelected = computed(() => {
+  return questions.value.length > 0 && questions.value.every(q => selectedIds.has(q.id))
+})
+
+const someSelected = computed(() => {
+  const selectedCount = questions.value.filter(q => selectedIds.has(q.id)).length
+  return selectedCount > 0 && selectedCount < questions.value.length
+})
+
+const toggleSelectAll = (checked) => {
+  if (checked) {
+    questions.value.forEach(q => selectedIds.add(q.id))
+  } else {
+    questions.value.forEach(q => selectedIds.delete(q.id))
+  }
+}
 
 const loadSources = async () => {
   try {
@@ -392,6 +444,22 @@ onMounted(() => {
   border: 1px solid #b3d8ff;
   border-radius: 6px;
   margin-bottom: 12px;
+}
+
+.select-all-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.total-count {
+  color: #909399;
 }
 
 .question-grid {

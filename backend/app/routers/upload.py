@@ -5,7 +5,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Body
 from fastapi.responses import FileResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,11 +69,29 @@ async def upload_file(
 
 
 @router.get("/api/sources", response_model=SourceListResponse)
-async def list_sources(db: AsyncSession = Depends(get_db)):
+async def list_sources(
+    status: str | None = Query(default=None, description="Filter by ocr_status"),
+    db: AsyncSession = Depends(get_db),
+):
     """List all uploaded sources."""
-    result = await db.execute(select(Source).order_by(Source.created_at.desc()))
+    query = select(Source).order_by(Source.created_at.desc())
+    if status:
+        query = query.where(Source.ocr_status == status)
+    result = await db.execute(query)
     sources = result.scalars().all()
     return SourceListResponse(sources=sources, total=len(sources))
+
+
+@router.get("/api/sources/subjects")
+async def list_subjects(db: AsyncSession = Depends(get_db)):
+    """Get distinct subjects from successful sources."""
+    result = await db.execute(
+        select(Source.subject)
+        .where(Source.ocr_status == "done", Source.subject.isnot(None))
+        .distinct()
+    )
+    subjects = [row[0] for row in result.all() if row[0]]
+    return {"subjects": subjects}
 
 
 @router.get("/api/sources/{source_id}", response_model=SourceResponse)
@@ -87,13 +105,64 @@ async def get_source(source_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.delete("/api/sources/{source_id}")
 async def delete_source(source_id: str, db: AsyncSession = Depends(get_db)):
-    """Delete a source and all its questions."""
+    """Delete a source, its questions, and OCR output files."""
     source = await db.get(Source, source_id)
     if not source:
         raise HTTPException(404, "Source not found")
+    
+    # Delete OCR output files if they exist
+    if source.ocr_result_path:
+        import shutil
+        ocr_dir = Path(source.ocr_result_path)
+        if ocr_dir.exists():
+            shutil.rmtree(ocr_dir, ignore_errors=True)
+    
+    # Delete uploaded file
+    upload_file = Path(source.file_path)
+    if upload_file.exists():
+        upload_file.unlink(missing_ok=True)
+    
     await db.delete(source)
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/api/sources/batch-delete")
+async def batch_delete_sources(
+    source_ids: list[str] = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete multiple sources and their files."""
+    import shutil
+    count = 0
+    for sid in source_ids:
+        source = await db.get(Source, sid)
+        if not source:
+            continue
+        # Delete OCR output
+        if source.ocr_result_path:
+            ocr_dir = Path(source.ocr_result_path)
+            if ocr_dir.exists():
+                shutil.rmtree(ocr_dir, ignore_errors=True)
+        # Delete uploaded file
+        upload_file = Path(source.file_path)
+        if upload_file.exists():
+            upload_file.unlink(missing_ok=True)
+        await db.delete(source)
+        count += 1
+    await db.commit()
+    return {"ok": True, "count": count}
+
+
+@router.post("/api/jobs/clear-failed")
+async def clear_failed_jobs(db: AsyncSession = Depends(get_db)):
+    """Clear all failed/completed jobs from the queue."""
+    from sqlalchemy import delete as sa_delete
+    result = await db.execute(
+        sa_delete(Job).where(Job.status.in_(["failed", "success"]))
+    )
+    await db.commit()
+    return {"ok": True, "cleared": result.rowcount}
 
 
 @router.get("/api/jobs", response_model=list[JobResponse])
