@@ -34,6 +34,13 @@ async def upload_file(
     if file_ext not in allowed_types:
         raise HTTPException(400, f"Unsupported file type: {file_ext}")
 
+    # Check for duplicate file (same filename)
+    existing = await db.execute(
+        select(Source).where(Source.filename == file.filename)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(400, f"文件 '{file.filename}' 已上传过，请勿重复上传")
+
     # Save file
     file_id = str(uuid.uuid4())[:8]
     safe_name = f"{file_id}_{file.filename}"
