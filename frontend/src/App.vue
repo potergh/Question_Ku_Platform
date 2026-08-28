@@ -18,10 +18,6 @@
           <el-icon><Files /></el-icon>
           <span>题库管理</span>
         </el-menu-item>
-        <el-menu-item index="/handout">
-          <el-icon><Document /></el-icon>
-          <span>讲义编辑</span>
-        </el-menu-item>
         <el-menu-item index="/ai">
           <el-icon><MagicStick /></el-icon>
           <span>AI 助手</span>

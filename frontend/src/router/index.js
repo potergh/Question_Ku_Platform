@@ -16,11 +16,6 @@ const routes = [
     component: () => import('../views/LibraryView.vue'),
   },
   {
-    path: '/handout',
-    name: 'Handout',
-    component: () => import('../views/HandoutView.vue'),
-  },
-  {
     path: '/tags',
     name: 'Tags',
     component: () => import('../views/TagsView.vue'),

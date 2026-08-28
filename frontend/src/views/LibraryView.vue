@@ -54,6 +54,11 @@
         </el-col>
       </el-row>
       <el-row style="margin-top: 8px;" :gutter="12" align="middle">
+        <el-col :span="3">
+          <el-select v-model="filters.grade" placeholder="年级" clearable @change="loadQuestions">
+            <el-option v-for="g in gradeOptions" :key="g" :label="g" :value="g" />
+          </el-select>
+        </el-col>
         <el-col :span="8">
           <el-select v-model="filters.tag_ids" multiple placeholder="按标签筛选" clearable filterable @change="loadQuestions" style="width: 100%;">
             <el-option label="⚠ 未打标签" value="none" />
@@ -73,7 +78,6 @@
       <el-button type="warning" size="small" @click="batchAICorrect">AI 批量修正</el-button>
       <el-button type="info" size="small" @click="showTagDialog = true">批量打标签</el-button>
       <el-button type="warning" size="small" @click="batchAITag">AI 批量打标</el-button>
-      <el-button type="primary" size="small" @click="addToHandout">加入讲义</el-button>
       <el-button type="danger" size="small" @click="batchDelete">批量删除</el-button>
       <el-button text size="small" @click="selectedIds.clear()">取消选择</el-button>
     </div>
@@ -162,6 +166,7 @@
             <el-rate v-model="detailQuestion.difficulty" :max="5" disabled size="small" />
           </el-descriptions-item>
           <el-descriptions-item label="分值">{{ detailQuestion.score || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="年级">{{ detailQuestion.grade || '-' }}</el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag :type="reviewTagType(detailQuestion.review_status)">{{ reviewText(detailQuestion.review_status) }}</el-tag>
           </el-descriptions-item>
@@ -230,6 +235,13 @@
             </div>
           </el-col>
         </el-row>
+
+        <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
+          <span style="color: #606266; font-size: 14px; white-space: nowrap;">年级:</span>
+          <el-select v-model="detailQuestion.grade" placeholder="选择年级" clearable style="width: 160px;">
+            <el-option v-for="g in gradeOptions" :key="g" :label="g" :value="g" />
+          </el-select>
+        </div>
 
         <!-- Tags Section -->
         <div style="margin-top: 16px;">
@@ -535,9 +547,13 @@ const filters = reactive({
   question_type: '',
   review_status: '',
   difficulty: null,
+  grade: '',
   source_id: '',
   tag_ids: [],
 })
+
+// 年级筛选默认选项（题目年级数据后续逐步回填）
+const gradeOptions = ['初一', '初二', '初三', '中考']
 
 // Dynamic subjects from API
 const availableSubjects = computed(() => {
@@ -602,6 +618,7 @@ const loadQuestions = async () => {
     if (filters.question_type) params.question_type = filters.question_type
     if (filters.review_status) params.review_status = filters.review_status
     if (filters.difficulty) params.difficulty = filters.difficulty
+    if (filters.grade) params.grade = filters.grade
     if (filters.source_id) params.source_id = filters.source_id
     if (filters.tag_ids?.length) params.tag_ids = filters.tag_ids.join(',')
 
@@ -634,6 +651,7 @@ const saveDetail = async () => {
       answer: q.answer,
       explanation: q.explanation,
       difficulty: q.difficulty,
+      grade: q.grade,
     })
     ElMessage.success('已保存')
     loadQuestions()
@@ -723,10 +741,6 @@ const doBatchTag = async () => {
   } catch (e) {
     ElMessage.error(`${actionText}标签失败`)
   }
-}
-
-const addToHandout = () => {
-  ElMessage.info(`已选 ${selectedIds.size} 题，讲义选择功能开发中`)
 }
 
 // ── AI Correction ──

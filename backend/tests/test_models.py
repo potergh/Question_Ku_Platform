@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database import Base
-from app.models import Source, Question, Tag, Handout, HandoutItem, Settings, Job
+from app.models import Source, Question, Tag, Settings, Job
 
 
 # Use a separate in-memory DB for tests
@@ -148,52 +148,6 @@ async def test_question_tag_association(db: AsyncSession):
 
     assert len(question.tags) == 1
     assert question.tags[0].name == "牛顿定律"
-
-
-# ── Handout + HandoutItem with snapshot ────────────────
-
-async def test_handout_with_snapshot(db: AsyncSession):
-    source = Source(filename="test.pdf", file_path="/tmp/test.pdf", file_type="pdf")
-    db.add(source)
-    await db.commit()
-
-    question = Question(
-        source_id=source.id,
-        source_question_id="Q004",
-        question_number=4,
-        content="Original content",
-        options=[{"label": "A", "content": "opt1"}],
-        answer="A",
-    )
-    db.add(question)
-    await db.commit()
-
-    handout = Handout(title="物理讲义", subject="物理")
-    db.add(handout)
-    await db.commit()
-
-    item = HandoutItem(
-        handout_id=handout.id,
-        order=1,
-        item_type="question",
-        question_id=question.id,
-        question_snapshot={
-            "content": question.content,
-            "options": question.options,
-            "answer": question.answer,
-        },
-    )
-    db.add(item)
-    await db.commit()
-    await db.refresh(item)
-
-    assert item.question_snapshot["content"] == "Original content"
-
-    # Modify original question — snapshot should NOT change
-    question.content = "Modified content"
-    await db.commit()
-    await db.refresh(item)
-    assert item.question_snapshot["content"] == "Original content"
 
 
 # ── Settings ───────────────────────────────────────────

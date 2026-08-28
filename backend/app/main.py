@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
-from app.routers import upload, questions, handouts, tags, settings as settings_router
+from app.routers import upload, questions, tags, settings as settings_router
 
 
 logging.basicConfig(level=logging.INFO)
@@ -72,7 +72,6 @@ app.add_middleware(
 # Routers
 app.include_router(upload.router)
 app.include_router(questions.router)
-app.include_router(handouts.router)
 app.include_router(tags.router)
 app.include_router(settings_router.router)
 

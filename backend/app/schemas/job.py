@@ -10,7 +10,6 @@ class JobResponse(BaseModel):
     status: str
     progress: float
     source_id: str | None
-    handout_id: str | None
     error_message: str | None
     cancelled: bool = False
     created_at: datetime

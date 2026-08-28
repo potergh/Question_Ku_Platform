@@ -1,6 +1,6 @@
 /**
  * Shared content renderer — handles LaTeX, images, and basic Markdown.
- * Used by LibraryView (detail preview) and HandoutView (item preview).
+ * Used by LibraryView (detail preview).
  */
 import katex from 'katex'
 import 'katex/dist/katex.min.css'

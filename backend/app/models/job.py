@@ -20,7 +20,6 @@ class Job(Base):
     # queued / running / success / failed / cancelled
     progress: Mapped[float] = mapped_column(Float, default=0.0)  # 0-100
     source_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    handout_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     cancelled: Mapped[bool] = mapped_column(Boolean, default=False)  # Cancellation flag
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
