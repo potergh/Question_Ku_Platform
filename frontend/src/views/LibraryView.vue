@@ -820,6 +820,13 @@ const removeTagFromDetail = async (tagId) => {
 
 const aiTagSingle = async () => {
   if (!detailQuestion.value) return
+
+  // Check if any tags exist
+  if (!allTags.value || allTags.value.length === 0) {
+    ElMessage.warning('请先在标签管理中创建标签，AI 只能从已有标签中选择')
+    return
+  }
+
   aiTagging.value = true
   try {
     const res = await axios.post('/api/questions/batch-ai-tag', {
@@ -835,7 +842,7 @@ const aiTagSingle = async () => {
       ElMessage.info('AI 未找到合适标签')
     }
   } catch (e) {
-    ElMessage.error('AI 打标失败')
+    ElMessage.error('AI 打标失败: ' + (e.response?.data?.detail || e.message))
   } finally {
     aiTagging.value = false
   }
@@ -843,9 +850,16 @@ const aiTagSingle = async () => {
 
 const batchAITag = async () => {
   if (selectedIds.size === 0) return
+
+  // Check if any tags exist
+  if (!allTags.value || allTags.value.length === 0) {
+    ElMessage.warning('请先在标签管理中创建标签，AI 只能从已有标签中选择')
+    return
+  }
+
   try {
     await ElMessageBox.confirm(
-      `将对 ${selectedIds.size} 道题执行 AI 批量打标，所有题目会合并为一次调用。继续？`,
+      `将对 ${selectedIds.size} 道题执行 AI 批量打标，AI 会从已创建的 ${allTags.value.length} 个标签中选择合适的。继续？`,
       'AI 批量打标', { type: 'info' }
     )
   } catch { return }
@@ -867,7 +881,7 @@ const batchAITag = async () => {
     loadQuestions()
   } catch (e) {
     batchTagState.value = 'done'
-    ElMessage.error('AI 批量打标失败')
+    ElMessage.error('AI 批量打标失败: ' + (e.response?.data?.detail || e.message))
   }
 }
 
