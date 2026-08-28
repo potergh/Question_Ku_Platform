@@ -56,6 +56,7 @@
       <el-row style="margin-top: 8px;" :gutter="12" align="middle">
         <el-col :span="8">
           <el-select v-model="filters.tag_ids" multiple placeholder="按标签筛选" clearable filterable @change="loadQuestions" style="width: 100%;">
+            <el-option label="⚠ 未打标签" value="none" />
             <el-option v-for="t in allTags" :key="t.id" :label="`${subjectText(t.subject)} / ${categoryText(t.category)} / ${t.name}`" :value="t.id" />
           </el-select>
         </el-col>

@@ -64,13 +64,21 @@ async def list_questions(
     if tag_ids:
         tid_list = [t.strip() for t in tag_ids.split(",") if t.strip()]
         if tid_list:
-            query = query.where(
-                Question.id.in_(
-                    select(question_tags.c.question_id).where(
-                        question_tags.c.tag_id.in_(tid_list)
+            if tid_list == ["none"]:
+                # Questions with NO tags
+                query = query.where(
+                    ~Question.id.in_(
+                        select(question_tags.c.question_id)
                     )
                 )
-            )
+            else:
+                query = query.where(
+                    Question.id.in_(
+                        select(question_tags.c.question_id).where(
+                            question_tags.c.tag_id.in_(tid_list)
+                        )
+                    )
+                )
 
     # Count total
     count_query = select(func.count()).select_from(query.subquery())
