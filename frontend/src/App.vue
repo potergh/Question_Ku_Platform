@@ -18,6 +18,14 @@
           <el-icon><Files /></el-icon>
           <span>题库管理</span>
         </el-menu-item>
+        <el-menu-item index="/basket">
+          <el-icon><ShoppingCart /></el-icon>
+          <span>选题池</span>
+        </el-menu-item>
+        <el-menu-item index="/practices">
+          <el-icon><Notebook /></el-icon>
+          <span>练习</span>
+        </el-menu-item>
         <el-menu-item index="/ai">
           <el-icon><MagicStick /></el-icon>
           <span>AI 助手</span>
