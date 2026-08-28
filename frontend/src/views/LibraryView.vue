@@ -692,7 +692,7 @@ const batchAICorrect = async () => {
   if (selectedIds.size === 0) return
   try {
     await ElMessageBox.confirm(
-      `将对 ${selectedIds.size} 道题执行 AI 修正，每道题会消耗一次 AI 调用。继续？`,
+      `将对 ${selectedIds.size} 道题执行 AI 批量修正，所有题目会合并处理。继续？`,
       'AI 批量修正', { type: 'info' }
     )
   } catch { return }
@@ -815,7 +815,7 @@ const batchAITag = async () => {
   if (selectedIds.size === 0) return
   try {
     await ElMessageBox.confirm(
-      `将对 ${selectedIds.size} 道题执行 AI 自动打标，每道题会调用一次 AI。继续？`,
+      `将对 ${selectedIds.size} 道题执行 AI 批量打标，所有题目会合并为一次调用。继续？`,
       'AI 批量打标', { type: 'info' }
     )
   } catch { return }
