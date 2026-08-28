@@ -78,7 +78,7 @@ export function renderFullContent(text, options = {}) {
     html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
       imgCount++
       if (imgCount > maxImages) return ''
-      return `<img src="${url}" alt="${alt}" style="max-width:100%;height:auto;margin:4px 0;border-radius:4px;" loading="lazy" />`
+      return `<img src="${url}" alt="${alt}" style="max-width:min(100%, 400px);max-height:300px;height:auto;margin:4px 0;border-radius:4px;" loading="lazy" />`
     })
   } else {
     // Strip images entirely

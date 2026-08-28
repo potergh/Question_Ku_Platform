@@ -718,7 +718,8 @@ onMounted(() => {
   overflow-wrap: break-word;
 }
 .rendered-preview :deep(img) {
-  max-width: 100%;
+  max-width: min(100%, 400px);
+  max-height: 300px;
   height: auto;
   border-radius: 4px;
   margin: 6px 0;

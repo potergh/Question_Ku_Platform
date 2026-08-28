@@ -109,6 +109,11 @@ class OCRAdapter:
         # Options: extract from content.options (dict) and convert to list
         options = self._extract_options(ocr_question)
 
+        # Content-aware type correction:
+        # If section header says "choice" but no options found → reclassify
+        # If section header says "fill" but options found → reclassify
+        q_type = _correct_question_type(q_type, content, options)
+
         # Answer and explanation
         answer_data = ocr_question.get("answer", {})
         answer = answer_data.get("content") if isinstance(answer_data, dict) else str(answer_data) if answer_data else None
@@ -196,6 +201,44 @@ class OCRAdapter:
             content = f"{content}\n\n{figure_md}" if content else figure_md
 
         return content.strip()
+
+
+def _correct_question_type(original_type: str | None, content: str, options: list[dict]) -> str | None:
+    """Correct question type based on actual content, not just section headers.
+
+    Rules:
+    - Has options (A/B/C/D) → must be choice type (single or multiple)
+    - No options + was choice type → reclassify to fill_blank or comprehensive
+    - Content has blanks like ___ or （  ）→ likely fill_blank
+    - Content is long with sub-questions → likely comprehensive
+    """
+    has_options = bool(options and len(options) >= 2)
+
+    if has_options:
+        # Has options → must be a choice question
+        if original_type in ("fill_blank", "comprehensive", "experiment", "calculation", "short_answer", "essay"):
+            # Section header was wrong but content has options → it's a choice question
+            # Distinguish single vs multiple by looking for hints
+            return "single_choice"  # default; AI tagging can refine to multiple_choice
+        return original_type or "single_choice"
+
+    # No options
+    if original_type in ("single_choice", "multiple_choice"):
+        # Section header said "choice" but no options found → reclassify
+        # Check for fill-blank indicators
+        fill_indicators = ["___", "＿＿＿", "（  ）", "(  )", "（）", "()"]
+        has_fill_hint = any(ind in content for ind in fill_indicators)
+        if has_fill_hint:
+            return "fill_blank"
+        # Check for comprehensive indicators (multi-part, long content)
+        if any(kw in content for kw in ["（1）", "(1)", "①", "解：", "证明："]):
+            return "comprehensive"
+        # Default: if content is long, comprehensive; otherwise fill_blank
+        if len(content) > 150:
+            return "comprehensive"
+        return "fill_blank"
+
+    return original_type or "unknown"
 
 
 @dataclass

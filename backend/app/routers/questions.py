@@ -341,3 +341,52 @@ async def batch_ai_correct(
             results.append({"question_id": qid, "error": str(e)})
 
     return {"ok": True, "results": results}
+
+
+@router.post("/api/questions/batch-ai-tag")
+async def batch_ai_tag(
+    question_ids: list[str] = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-run AI auto-tagging on existing questions."""
+    from app.services.ai_service import auto_tag_question, AIServiceError
+
+    tagged = 0
+    errors = 0
+    for qid in question_ids:
+        question = await db.get(Question, qid)
+        if not question or question.is_deleted:
+            continue
+        try:
+            suggestions = await auto_tag_question(
+                db, question.content, question.options, question.answer
+            )
+            question.ai_suggestions = suggestions
+
+            # Apply tags if confidence >= 0.5
+            if suggestions.get("confidence", 0) >= 0.5 and suggestions.get("tag_ids"):
+                for tid in suggestions["tag_ids"]:
+                    tag = await db.get(Tag, tid)
+                    if tag and tag not in question.tags:
+                        question.tags.append(tag)
+
+            # Apply question_type if not set
+            ai_qtype = suggestions.get("question_type")
+            if ai_qtype and not question.question_type:
+                for eng, chn in QUESTION_TYPE_MAP.items():
+                    if chn == ai_qtype:
+                        question.question_type = eng
+                        break
+                else:
+                    question.question_type = ai_qtype
+
+            tagged += 1
+        except AIServiceError:
+            break
+        except Exception as e:
+            errors += 1
+            import logging
+            logging.getLogger(__name__).warning(f"AI tagging failed for {qid}: {e}")
+
+    await db.commit()
+    return {"ok": True, "tagged": tagged, "errors": errors}

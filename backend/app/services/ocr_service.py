@@ -156,12 +156,24 @@ async def process_pdf_async(source_id: str, pdf_path: str, job_id: str):
                         )
                         q.ai_suggestions = suggestions
 
-                        # Auto-apply tags if confidence is high
-                        if suggestions.get("confidence", 0) > 0.7 and suggestions.get("tag_ids"):
+                        # Auto-apply tags if confidence >= 0.5
+                        if suggestions.get("confidence", 0) >= 0.5 and suggestions.get("tag_ids"):
                             for tid in suggestions["tag_ids"]:
                                 tag = await db.get(Tag, tid)
                                 if tag and tag not in q.tags:
                                     q.tags.append(tag)
+
+                        # Apply AI-suggested question_type if not already set well
+                        ai_qtype = suggestions.get("question_type")
+                        if ai_qtype and not q.question_type:
+                            from app.utils.question_types import QUESTION_TYPE_MAP
+                            # Map Chinese type back to English key
+                            for eng, chn in QUESTION_TYPE_MAP.items():
+                                if chn == ai_qtype:
+                                    q.question_type = eng
+                                    break
+                            else:
+                                q.question_type = ai_qtype
                     except AIServiceError:
                         # AI unavailable, skip silently
                         break
