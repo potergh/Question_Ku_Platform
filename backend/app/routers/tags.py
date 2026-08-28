@@ -1,6 +1,6 @@
 """Tag router — CRUD + tree structure."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -89,3 +89,31 @@ async def delete_tag(tag_id: str, db: AsyncSession = Depends(get_db)):
     await db.delete(tag)
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/api/tags/batch-create")
+async def batch_create_tags(
+    names: list[str] = Body(..., embed=True),
+    subject: str = Body(default=None),
+    category: str = Body(default="knowledge"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Batch create tags from a list of names."""
+    created = 0
+    skipped = 0
+    for name in names:
+        name = name.strip()
+        if not name:
+            continue
+        # Check if tag already exists with same name+subject+category
+        existing = await db.execute(
+            select(Tag).where(Tag.name == name, Tag.subject == subject, Tag.category == category)
+        )
+        if existing.scalar_one_or_none():
+            skipped += 1
+            continue
+        tag = Tag(name=name, subject=subject, category=category)
+        db.add(tag)
+        created += 1
+    await db.commit()
+    return {"ok": True, "created": created, "skipped": skipped}

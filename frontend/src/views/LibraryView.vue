@@ -271,6 +271,9 @@
         <el-button type="primary" size="small" @click="showCreateTag = true">
           <el-icon><Plus /></el-icon> 新增
         </el-button>
+        <el-button size="small" @click="showBatchImport = true">
+          <el-icon><Upload /></el-icon> 批量导入
+        </el-button>
       </div>
       <div style="display: flex; flex-wrap: wrap; gap: 8px;">
         <div v-for="t in filteredMgmtTags" :key="t.id" class="mgmt-tag">
@@ -313,6 +316,27 @@
       <template #footer>
         <el-button @click="showCreateTag = false; editingTagItem = null">取消</el-button>
         <el-button type="primary" @click="saveTagItem" :disabled="!tagForm.name">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Batch Import Tags Dialog -->
+    <el-dialog v-model="showBatchImport" title="批量导入标签" width="500px" append-to-body>
+      <p style="color: #909399; font-size: 13px; margin-bottom: 8px;">
+        每行一个标签名，将导入到当前选中的学科和分类：
+        <b>{{ subjectText(mgmtSubject) }} / {{ categoryText(mgmtCategory) }}</b>
+      </p>
+      <el-input
+        v-model="batchImportText"
+        type="textarea"
+        :rows="10"
+        placeholder="每行一个标签名，例如：&#10;电磁学&#10;力学&#10;光学&#10;热学"
+      />
+      <p style="color: #67c23a; font-size: 12px; margin-top: 6px;" v-if="batchImportNames.length > 0">
+        将导入 {{ batchImportNames.length }} 个标签
+      </p>
+      <template #footer>
+        <el-button @click="showBatchImport = false">取消</el-button>
+        <el-button type="primary" @click="doBatchImport" :disabled="batchImportNames.length === 0">导入</el-button>
       </template>
     </el-dialog>
 
@@ -431,6 +455,8 @@ const mgmtCategory = ref('knowledge')
 const tagForm = reactive({ name: '', subject: 'physics', category: 'knowledge', color: null })
 const detailTagSelect = ref('')
 const aiTagging = ref(false)
+const showBatchImport = ref(false)
+const batchImportText = ref('')
 
 // AI correction state
 const aiCorrecting = ref(false)
@@ -842,6 +868,29 @@ const deleteTagItem = async (tag) => {
     loadQuestions()
   } catch (e) {
     if (e !== 'cancel') ElMessage.error('删除失败')
+  }
+}
+
+// Batch import tags
+const batchImportNames = computed(() => {
+  return batchImportText.value.split('\n').map(s => s.trim()).filter(s => s.length > 0)
+})
+
+const doBatchImport = async () => {
+  const names = batchImportNames.value
+  if (names.length === 0) return
+  try {
+    const res = await axios.post('/api/tags/batch-create', {
+      names,
+      subject: mgmtSubject.value,
+      category: mgmtCategory.value,
+    })
+    ElMessage.success(`导入成功：${res.data.created} 个新标签，${res.data.skipped} 个重复跳过`)
+    showBatchImport.value = false
+    batchImportText.value = ''
+    loadTags()
+  } catch (e) {
+    ElMessage.error('导入失败')
   }
 }
 
