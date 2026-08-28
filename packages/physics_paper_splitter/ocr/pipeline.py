@@ -14,6 +14,35 @@ from .structure import infer_question_type, parse_content
 
 SECTION_RE = re.compile(r"^\s*[一二三四五六七八九十]+、.*$")
 
+# 原生文字中替换字符 (U+FFFD) 超过此阈值，说明字体编码严重损坏，应回退到 OCR
+_GARBLED_THRESHOLD = 3
+
+
+def _select_best_text(native_text: str, ocr_text: str, native_score: float) -> str:
+    """根据质量选择最佳文字源。
+
+    策略：
+    - 原生文字无乱码且质量高分 → 优先原生（保留 PDF 精确排版）
+    - 原生文字含大量乱码 → 回退到 OCR（图片识别不依赖字体编码）
+    - 两者都有问题时 → 选较长的（信息量更大）
+    """
+    garbled_count = native_text.count("\ufffd")
+
+    # 原生文字严重损坏 → 回退 OCR
+    if garbled_count >= _GARBLED_THRESHOLD and ocr_text:
+        return ocr_text
+
+    # 原生文字质量尚可 → 优先原生
+    if native_text and native_score >= 0.7:
+        return native_text
+
+    # 原生文字为空或质量低 → 用 OCR
+    if ocr_text:
+        return ocr_text
+
+    # 都没有就用原生（可能为空）
+    return native_text
+
 
 def _section_for_question(doc: fitz.Document, record: QuestionRecord) -> str | None:
     """查找题号之前最近的章节标题，用于判断题型。"""
@@ -56,8 +85,8 @@ class QuestionTextPipeline:
             if self.engine is not None:
                 ocr_text, ocr_confidence = self.engine.recognize(question_dir / record.filename)
 
-            # 选文仍保持原生优先；融合层只产出冲突与校验报告，不擅自改写文本。
-            selected_text = native_text if native_text else ocr_text
+            # 根据质量选择最佳文字源（原生乱码严重时回退到 OCR）
+            selected_text = _select_best_text(native_text, ocr_text, native_score)
             parsed = parse_content(selected_text)
             section = _section_for_question(doc, record)
             fusion = fuse(
