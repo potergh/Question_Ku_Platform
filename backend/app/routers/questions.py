@@ -24,6 +24,8 @@ async def list_questions(
     subject: str | None = Query(default=None),
     difficulty: int | None = Query(default=None),
     grade: str | None = Query(default=None),
+    has_answer: bool | None = Query(default=None, description="true=仅有答案，false=仅无答案"),
+    has_explanation: bool | None = Query(default=None),
     search: str | None = Query(default=None),
     tag_ids: str | None = Query(default=None, description="Comma-separated tag IDs"),
     page: int = Query(default=1, ge=1),
@@ -51,6 +53,12 @@ async def list_questions(
         query = query.where(Question.difficulty == difficulty)
     if grade:
         query = query.where(Question.grade == grade)
+    if has_answer is not None:
+        cond = Question.answer.isnot(None) & (func.trim(Question.answer) != "")
+        query = query.where(cond if has_answer else ~cond)
+    if has_explanation is not None:
+        cond = Question.explanation.isnot(None) & (func.trim(Question.explanation) != "")
+        query = query.where(cond if has_explanation else ~cond)
     if search:
         pattern = f"%{search}%"
         query = query.where(
