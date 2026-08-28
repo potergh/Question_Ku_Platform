@@ -422,6 +422,24 @@
         <el-button v-if="batchAIState === 'done'" type="primary" @click="showBatchAIProgress = false; loadQuestions()">完成</el-button>
       </template>
     </el-dialog>
+
+    <!-- Batch AI Tag Progress Dialog -->
+    <el-dialog v-model="showBatchTagProgress" title="AI 批量打标" width="500px">
+      <div v-if="batchTagState === 'running'">
+        <el-progress :percentage="batchTagProgress" />
+        <p style="margin-top: 8px; color: #909399;">正在分析 {{ batchTagTotal }} 道题目的标签...</p>
+      </div>
+      <div v-if="batchTagState === 'done'">
+        <el-result icon="success" title="批量打标完成">
+          <template #sub-title>
+            成功打标 {{ batchTagResult }} 道题
+          </template>
+        </el-result>
+      </div>
+      <template #footer>
+        <el-button v-if="batchTagState === 'done'" type="primary" @click="showBatchTagProgress = false; loadQuestions()">完成</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -457,6 +475,13 @@ const detailTagSelect = ref('')
 const aiTagging = ref(false)
 const showBatchImport = ref(false)
 const batchImportText = ref('')
+
+// Batch AI tag progress state
+const showBatchTagProgress = ref(false)
+const batchTagState = ref('idle') // idle / running / done
+const batchTagProgress = ref(0)
+const batchTagTotal = ref(0)
+const batchTagResult = ref(0)
 
 // AI correction state
 const aiCorrecting = ref(false)
@@ -824,13 +849,24 @@ const batchAITag = async () => {
       'AI 批量打标', { type: 'info' }
     )
   } catch { return }
+
+  showBatchTagProgress.value = true
+  batchTagState.value = 'running'
+  batchTagTotal.value = selectedIds.size
+  batchTagProgress.value = 50
+  batchTagResult.value = 0
+
   try {
     const res = await axios.post('/api/questions/batch-ai-tag', {
       question_ids: [...selectedIds],
     })
-    ElMessage.success(`AI 打标完成：${res.data.tagged} 道题`)
+    batchTagResult.value = res.data.tagged || 0
+    batchTagProgress.value = 100
+    batchTagState.value = 'done'
+    selectedIds.clear()
     loadQuestions()
   } catch (e) {
+    batchTagState.value = 'done'
     ElMessage.error('AI 批量打标失败')
   }
 }
