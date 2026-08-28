@@ -60,6 +60,9 @@
                 <el-button type="primary" size="small" @click="exportPdf" :loading="exporting" :disabled="!currentHandout.items?.length">
                   <el-icon><Download /></el-icon> 导出 PDF
                 </el-button>
+                <el-button size="small" @click="showAIDrawer = true" type="success">
+                  <el-icon><MagicStick /></el-icon> AI 助手
+                </el-button>
               </div>
             </div>
           </template>
@@ -190,6 +193,82 @@
         <el-button type="primary" @click="addKnowledgeNote" :disabled="!newNoteContent">添加</el-button>
       </template>
     </el-dialog>
+
+    <!-- AI Assistant Drawer -->
+    <el-drawer v-model="showAIDrawer" title="AI 助手" size="480px" direction="rtl">
+      <div class="ai-panel">
+        <!-- Student Profile -->
+        <div class="ai-section">
+          <label class="ai-label">学生特点</label>
+          <el-input
+            v-model="aiStudentProfile"
+            type="textarea"
+            :rows="2"
+            placeholder="例：高二学生，力学基础薄弱，计算能力一般"
+          />
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="ai-actions">
+          <el-button @click="aiAction('suggest_structure')" :loading="aiLoading" :disabled="!aiStudentProfile">
+            📝 建议结构
+          </el-button>
+          <el-button @click="aiAction('recommend_questions')" :loading="aiLoading" :disabled="!aiStudentProfile">
+            🎯 推荐题目
+          </el-button>
+          <el-button @click="showNoteGenDialog = true" :disabled="!aiStudentProfile">
+            ✍️ 生成备注
+          </el-button>
+        </div>
+
+        <!-- Results -->
+        <div class="ai-results" v-if="aiResults.length">
+          <div v-for="(r, i) in aiResults" :key="i" class="ai-result-item">
+            <el-card size="small">
+              <div class="result-header">
+                <el-tag size="small" :type="r.confidence > 0.7 ? 'success' : 'warning'">
+                  {{ r.confidence ? `${Math.round(r.confidence * 100)}%` : r.title ? '章节' : '备注' }}
+                </el-tag>
+                <span class="result-title">{{ r.title || r.content?.slice(0, 50) || '...' }}</span>
+              </div>
+              <div class="result-reason" v-if="r.reason">{{ r.reason }}</div>
+              <div class="result-desc" v-if="r.description">{{ r.description }}</div>
+              <div class="result-md" v-if="r.markdown" v-html="renderMarkdown(r.markdown)"></div>
+              <div class="result-actions">
+                <el-button size="small" type="primary" @click="adoptAIResult(r)">
+                  采纳
+                </el-button>
+              </div>
+            </el-card>
+          </div>
+        </div>
+
+        <el-empty v-if="!aiResults.length && !aiLoading" description="输入学生特点，选择 AI 操作" :image-size="60" />
+        <div v-if="aiLoading" class="ai-loading">
+          <el-icon class="is-loading"><Loading /></el-icon> AI 思考中...
+        </div>
+
+        <el-alert v-if="aiError" :title="aiError" type="error" :closable="true" style="margin-top: 12px;" />
+      </div>
+    </el-drawer>
+
+    <!-- Generate Note Dialog -->
+    <el-dialog v-model="showNoteGenDialog" title="AI 生成教学备注" width="500px">
+      <el-form>
+        <el-form-item label="主题">
+          <el-input v-model="aiNoteTopic" placeholder="例：牛顿第二定律" />
+        </el-form-item>
+        <el-form-item label="补充说明">
+          <el-input v-model="aiNoteContext" type="textarea" :rows="2" placeholder="可选" />
+        </el-form-item>
+      </el-form>
+      <div v-if="aiGeneratedNote" class="generated-note-preview" v-html="renderMarkdown(aiGeneratedNote)"></div>
+      <template #footer>
+        <el-button @click="showNoteGenDialog = false">取消</el-button>
+        <el-button @click="generateNote" :loading="aiLoading" :disabled="!aiNoteTopic">生成</el-button>
+        <el-button type="primary" @click="adoptGeneratedNote" :disabled="!aiGeneratedNote">采纳并添加</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -218,6 +297,17 @@ const exporting = ref(false)
 const availableQuestions = ref([])
 const selectedQuestions = ref([])
 const pendingItemType = ref('question')
+
+// AI panel state
+const showAIDrawer = ref(false)
+const aiStudentProfile = ref('')
+const aiLoading = ref(false)
+const aiResults = ref([])
+const aiError = ref('')
+const showNoteGenDialog = ref(false)
+const aiNoteTopic = ref('')
+const aiNoteContext = ref('')
+const aiGeneratedNote = ref('')
 
 const addDialogTitle = computed(() => {
   const map = { question: '从题库选题', example: '添加例题', exercise: '添加练习' }
@@ -360,6 +450,89 @@ const exportPdf = async () => {
   } catch (e) { ElMessage.error('导出失败') } finally { exporting.value = false }
 }
 
+// ── AI Actions ──
+const aiAction = async (action) => {
+  if (!currentHandout.value) return
+  aiLoading.value = true
+  aiError.value = ''
+  aiResults.value = []
+  try {
+    const res = await axios.post(`/api/handouts/${currentHandout.value.id}/ai-generate?action=${action}`, {
+      student_profile: aiStudentProfile.value,
+    })
+    aiResults.value = res.data.data || []
+    if (!aiResults.value.length) {
+      ElMessage.info('AI 没有找到合适的结果')
+    }
+  } catch (e) {
+    aiError.value = e.response?.data?.detail || 'AI 请求失败'
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+const generateNote = async () => {
+  if (!currentHandout.value || !aiNoteTopic.value) return
+  aiLoading.value = true
+  aiError.value = ''
+  aiGeneratedNote.value = ''
+  try {
+    const res = await axios.post(`/api/handouts/${currentHandout.value.id}/ai-generate?action=generate_notes`, {
+      student_profile: aiStudentProfile.value,
+      topic: aiNoteTopic.value,
+      context: aiNoteContext.value,
+    })
+    aiGeneratedNote.value = res.data.data?.markdown || ''
+  } catch (e) {
+    aiError.value = e.response?.data?.detail || 'AI 请求失败'
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+const adoptAIResult = async (result) => {
+  if (!currentHandout.value) return
+  try {
+    if (result.question_id) {
+      // It's a question recommendation
+      await axios.post(`/api/handouts/${currentHandout.value.id}/items`, {
+        item_type: 'question',
+        question_id: result.question_id,
+      })
+      ElMessage.success('已添加到讲义')
+      await selectHandout(currentHandout.value.id)
+    } else if (result.title) {
+      // It's a structure suggestion - add as section title
+      await axios.post(`/api/handouts/${currentHandout.value.id}/items`, {
+        item_type: 'section_title',
+        custom_content: result.title,
+      })
+      ElMessage.success('已添加章节标题')
+      await selectHandout(currentHandout.value.id)
+    }
+  } catch (e) {
+    ElMessage.error('添加失败')
+  }
+}
+
+const adoptGeneratedNote = async () => {
+  if (!aiGeneratedNote.value || !currentHandout.value) return
+  try {
+    await axios.post(`/api/handouts/${currentHandout.value.id}/items`, {
+      item_type: 'knowledge_note',
+      custom_content: aiGeneratedNote.value,
+    })
+    ElMessage.success('已添加教学备注')
+    showNoteGenDialog.value = false
+    aiNoteTopic.value = ''
+    aiNoteContext.value = ''
+    aiGeneratedNote.value = ''
+    await selectHandout(currentHandout.value.id)
+  } catch (e) {
+    ElMessage.error('添加失败')
+  }
+}
+
 // ── Helpers ──
 const truncate = (t, n) => t ? (t.length > n ? t.slice(0, n) + '...' : t) : ''
 const statusText = (s) => ({ draft: '草稿', ready: '待导出', exported: '已导出' })[s] || s
@@ -445,4 +618,26 @@ onMounted(() => { loadHandouts() })
 .note-edit { }
 
 .no-selection { min-height: calc(100vh - 180px); display: flex; align-items: center; justify-content: center; }
+
+/* AI Panel */
+.ai-panel { padding: 0 4px; }
+.ai-section { margin-bottom: 16px; }
+.ai-label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 13px; color: #606266; }
+.ai-actions { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.ai-results { display: flex; flex-direction: column; gap: 10px; }
+.ai-result-item :deep(.el-card__body) { padding: 10px; }
+.result-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.result-title { font-weight: 500; font-size: 14px; }
+.result-reason { font-size: 12px; color: #909399; margin-bottom: 4px; }
+.result-desc { font-size: 13px; color: #606266; margin-bottom: 4px; }
+.result-md { font-size: 13px; line-height: 1.6; color: #606266; margin-bottom: 6px; }
+.result-actions { margin-top: 6px; }
+.ai-loading { text-align: center; padding: 20px; color: #409eff; font-size: 14px; }
+.ai-loading .el-icon { font-size: 20px; margin-right: 6px; }
+
+.generated-note-preview {
+  max-height: 200px; overflow-y: auto; padding: 10px;
+  border: 1px solid #e4e7ed; border-radius: 4px; margin-top: 12px;
+  font-size: 13px; line-height: 1.6;
+}
 </style>

@@ -36,6 +36,10 @@ class Question(Base):
     review_status: Mapped[str] = mapped_column(String(20), default="pending")  # pending/approved/edited
     ocr_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # AI suggestions (populated after OCR if AI is enabled)
+    # {"tag_ids": [...], "difficulty": 3, "question_type": "...", "confidence": 0.8}
+    ai_suggestions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     # Soft delete
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

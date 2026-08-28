@@ -144,6 +144,37 @@ async def delete_question(question_id: str, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
+@router.post("/api/questions/{question_id}/accept-ai")
+async def accept_ai_suggestions(question_id: str, db: AsyncSession = Depends(get_db)):
+    """Apply AI suggestions to question fields (tags, difficulty, type)."""
+    question = await db.get(Question, question_id)
+    if not question or question.is_deleted:
+        raise HTTPException(404, "Question not found")
+    if not question.ai_suggestions:
+        raise HTTPException(400, "No AI suggestions available")
+
+    ai = question.ai_suggestions
+
+    # Apply difficulty if suggested and not already set
+    if ai.get("difficulty") and not question.difficulty:
+        question.difficulty = ai["difficulty"]
+
+    # Apply question_type if suggested and not already set
+    if ai.get("question_type") and not question.question_type:
+        question.question_type = ai["question_type"]
+
+    # Apply tags
+    if ai.get("tag_ids"):
+        for tid in ai["tag_ids"]:
+            tag = await db.get(Tag, tid)
+            if tag and tag not in question.tags:
+                question.tags.append(tag)
+
+    await db.commit()
+    await db.refresh(question, ["tags"])
+    return {"ok": True, "applied": ai}
+
+
 # ── Batch operations ────────────────────────────────────────────────
 
 

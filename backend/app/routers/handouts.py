@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -340,3 +340,68 @@ def _markdown_to_html(text: str) -> str:
     # Line breaks
     text = text.replace('\n', '<br>')
     return text
+
+
+# ── AI Generate ─────────────────────────────────────────────────────
+
+
+@router.post("/api/handouts/{handout_id}/ai-generate")
+async def ai_generate(
+    handout_id: str,
+    action: str = Query(..., description="recommend_questions | suggest_structure | generate_notes"),
+    student_profile: str = Body("", embed=True),
+    topic: str = Body("", embed=True),
+    context: str = Body("", embed=True),
+    count: int = Body(5, embed=True),
+    db: AsyncSession = Depends(get_db),
+):
+    """AI-powered handout assistance: recommend questions, suggest structure, generate notes."""
+    from app.services.ai_service import (
+        recommend_questions, suggest_structure, generate_notes, AIServiceError,
+    )
+    from app.models import Tag
+
+    result = await db.execute(
+        select(Handout).where(Handout.id == handout_id).options(selectinload(Handout.items))
+    )
+    handout = result.scalar_one_or_none()
+    if not handout:
+        raise HTTPException(404, "Handout not found")
+
+    try:
+        if action == "recommend_questions":
+            existing_ids = [
+                item.question_id for item in handout.items
+                if item.question_id and item.item_type in ("question", "example", "exercise")
+            ]
+            results = await recommend_questions(
+                db, handout_id, student_profile, existing_ids, count
+            )
+            # Enrich with question content
+            enriched = []
+            for rec in results:
+                q = await db.get(Question, rec["question_id"])
+                if q:
+                    enriched.append({
+                        **rec,
+                        "content": (q.content or "")[:150],
+                        "question_type": q.question_type,
+                    })
+            return {"ok": True, "data": enriched}
+
+        elif action == "suggest_structure":
+            # Get all tags for reference
+            tag_result = await db.execute(select(Tag).order_by(Tag.category, Tag.name))
+            tags = [{"id": t.id, "name": t.name, "category": t.category} for t in tag_result.scalars().all()]
+            results = await suggest_structure(db, handout.subject or "物理", student_profile, tags)
+            return {"ok": True, "data": results}
+
+        elif action == "generate_notes":
+            result = await generate_notes(db, topic, student_profile, context)
+            return {"ok": True, "data": {"markdown": result}}
+
+        else:
+            raise HTTPException(400, f"Unknown action: {action}")
+
+    except AIServiceError as e:
+        raise HTTPException(400, str(e))

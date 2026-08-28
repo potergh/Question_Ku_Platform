@@ -87,6 +87,9 @@
             :type="reviewTagType(q.review_status)"
             size="small"
           >{{ reviewText(q.review_status) }}</el-tag>
+          <el-tag v-if="q.ai_suggestions" size="small" type="warning" effect="plain" style="margin-left: 2px;">
+            AI
+          </el-tag>
         </div>
 
         <div class="q-card-body" @click.stop="openDetail(q)">
@@ -171,6 +174,20 @@
           <el-button v-if="detailQuestion.review_status === 'pending'" type="success" @click="quickReview('approve')">通过</el-button>
           <el-button v-if="detailQuestion.review_status === 'pending'" type="danger" @click="quickReview('reject')">驳回</el-button>
         </div>
+
+        <!-- AI Suggestions -->
+        <div v-if="detailQuestion.ai_suggestions" class="ai-suggest-box">
+          <div class="ai-suggest-header">
+            <el-icon style="color: #e6a23c;"><MagicStick /></el-icon>
+            <span>AI 建议</span>
+            <el-tag size="small" type="warning">{{ Math.round((detailQuestion.ai_suggestions.confidence || 0) * 100) }}% 置信</el-tag>
+          </div>
+          <div class="ai-suggest-body">
+            <span v-if="detailQuestion.ai_suggestions.question_type">题型: {{ detailQuestion.ai_suggestions.question_type }}</span>
+            <span v-if="detailQuestion.ai_suggestions.difficulty">难度: {{ detailQuestion.ai_suggestions.difficulty }}星</span>
+          </div>
+          <el-button size="small" type="warning" @click="acceptAI" :disabled="aiAccepted">采纳 AI 建议</el-button>
+        </div>
       </template>
     </el-drawer>
 
@@ -201,6 +218,7 @@ const pageSize = 50
 const selectedIds = reactive(new Set())
 const showDetail = ref(false)
 const detailQuestion = ref(null)
+const aiAccepted = ref(false)
 const showTagDialog = ref(false)
 const selectedTagIds = ref([])
 
@@ -252,6 +270,7 @@ const toggleSelect = (id) => {
 
 const openDetail = (q) => {
   detailQuestion.value = JSON.parse(JSON.stringify(q))
+  aiAccepted.value = false
   showDetail.value = true
 }
 
@@ -280,6 +299,17 @@ const quickReview = async (action) => {
     loadQuestions()
   } catch (e) {
     ElMessage.error('操作失败')
+  }
+}
+
+const acceptAI = async () => {
+  try {
+    await axios.post(`/api/questions/${detailQuestion.value.id}/accept-ai`)
+    ElMessage.success('已采纳 AI 建议')
+    aiAccepted.value = true
+    loadQuestions()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '操作失败')
   }
 }
 
@@ -402,4 +432,18 @@ onMounted(() => {
 .confidence { color: #67c23a; }
 
 .pagination { margin-top: 16px; text-align: center; }
+
+/* AI Suggestions */
+.ai-suggest-box {
+  margin-top: 16px; padding: 12px; background: #fdf6ec;
+  border: 1px solid #f5dab1; border-radius: 6px;
+}
+.ai-suggest-header {
+  display: flex; align-items: center; gap: 6px;
+  font-weight: 500; margin-bottom: 8px;
+}
+.ai-suggest-body {
+  display: flex; gap: 16px; font-size: 13px; color: #606266;
+  margin-bottom: 8px;
+}
 </style>

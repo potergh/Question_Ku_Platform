@@ -81,6 +81,47 @@ async def process_pdf_async(source_id: str, pdf_path: str, job_id: str):
             await db.commit()
             logger.info(f"OCR completed for source {source_id}: {result.question_count} questions")
 
+            # AI auto-tagging (if enabled)
+            try:
+                from app.services.ai_service import auto_tag_question, AIServiceError
+                from app.models import Tag
+
+                # Get newly created questions
+                q_result = await db.execute(
+                    select(Question).where(
+                        Question.source_id == source_id,
+                        Question.ai_suggestions.is_(None),
+                    )
+                )
+                new_questions = q_result.scalars().all()
+
+                for q in new_questions:
+                    try:
+                        suggestions = await auto_tag_question(
+                            db, q.content, q.options, q.answer
+                        )
+                        q.ai_suggestions = suggestions
+
+                        # Auto-apply tags if confidence is high
+                        if suggestions.get("confidence", 0) > 0.7 and suggestions.get("tag_ids"):
+                            for tid in suggestions["tag_ids"]:
+                                tag = await db.get(Tag, tid)
+                                if tag and tag not in q.tags:
+                                    q.tags.append(tag)
+                    except AIServiceError:
+                        # AI unavailable, skip silently
+                        break
+                    except Exception as e:
+                        logger.warning(f"AI tagging failed for question {q.id}: {e}")
+
+                await db.commit()
+                logger.info(f"AI tagging completed for {len(new_questions)} questions")
+
+            except AIServiceError:
+                pass  # AI is off, skip silently
+            except Exception as e:
+                logger.warning(f"AI tagging step failed: {e}")
+
         except Exception as e:
             logger.error(f"OCR failed for source {source_id}: {e}")
             # Update source status

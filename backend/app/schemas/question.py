@@ -33,6 +33,7 @@ class QuestionResponse(BaseModel):
     review_status: str
     ocr_confidence: float | None
     is_deleted: bool
+    ai_suggestions: dict | None = None
     tags: list[TagBrief] = []
     created_at: datetime
 
