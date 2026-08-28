@@ -177,7 +177,12 @@
         <el-input v-else v-model="detailQuestion.content" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" />
 
         <div v-if="detailQuestion.options?.length" style="margin-top: 12px;">
-          <h4>选项</h4>
+          <h4 style="display: flex; align-items: center; gap: 8px;">
+            选项
+            <el-tag v-if="detailQuestion.options.length < 4" type="warning" size="small" effect="dark">
+              选项不完整({{ detailQuestion.options.length }}/4)
+            </el-tag>
+          </h4>
           <!-- Preview mode: rendered LaTeX + images -->
           <template v-if="detailPreviewMode">
             <div v-for="(opt, i) in detailQuestion.options" :key="i" class="option-rendered"
@@ -186,11 +191,24 @@
           </template>
           <!-- Edit mode: input fields -->
           <template v-else>
-            <div v-for="(opt, i) in detailQuestion.options" :key="i" style="margin-bottom: 6px;">
-              <el-input v-model="opt.content" size="small">
-                <template #prepend>{{ opt.label }}</template>
+            <div v-for="(opt, i) in detailQuestion.options" :key="i" style="margin-bottom: 6px; display: flex; gap: 6px; align-items: center;">
+              <el-input v-model="opt.content" size="small" style="flex: 1;">
+                <template #prepend>
+                  <el-select v-model="opt.label" size="small" style="width: 60px;">
+                    <el-option label="A" value="A" />
+                    <el-option label="B" value="B" />
+                    <el-option label="C" value="C" />
+                    <el-option label="D" value="D" />
+                    <el-option label="E" value="E" />
+                    <el-option label="F" value="F" />
+                  </el-select>
+                </template>
               </el-input>
+              <el-button type="danger" size="small" @click="detailQuestion.options.splice(i, 1)" :icon="Delete" circle />
             </div>
+            <el-button type="primary" size="small" @click="addOption" style="margin-top: 6px;">
+              <el-icon><Plus /></el-icon> 添加选项
+            </el-button>
           </template>
         </div>
 
@@ -622,6 +640,16 @@ const saveDetail = async () => {
   } catch (e) {
     ElMessage.error('保存失败')
   }
+}
+
+const addOption = () => {
+  if (!detailQuestion.value.options) {
+    detailQuestion.value.options = []
+  }
+  const labels = ['A', 'B', 'C', 'D', 'E', 'F']
+  const existingLabels = new Set(detailQuestion.value.options.map(o => o.label))
+  const nextLabel = labels.find(l => !existingLabels.has(l)) || String.fromCharCode(65 + detailQuestion.value.options.length)
+  detailQuestion.value.options.push({ label: nextLabel, content: '' })
 }
 
 const quickReview = async (action) => {
