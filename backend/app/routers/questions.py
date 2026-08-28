@@ -448,6 +448,11 @@ async def batch_ai_tag(
             else:
                 question.question_type = ai_qtype
 
+        # Apply difficulty if not set
+        ai_diff = r.get("difficulty")
+        if ai_diff and not question.difficulty:
+            question.difficulty = ai_diff
+
         tagged += 1
 
     await db.commit()

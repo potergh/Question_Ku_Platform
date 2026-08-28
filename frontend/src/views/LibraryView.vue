@@ -195,15 +195,21 @@
         </div>
 
         <el-row :gutter="12" style="margin-top: 12px;">
-          <el-col :span="12">
+          <el-col :span="8">
             <el-input v-model="detailQuestion.answer" placeholder="答案">
               <template #prepend>答案</template>
             </el-input>
           </el-col>
-          <el-col :span="12">
+          <el-col :span="8">
             <el-input v-model="detailQuestion.explanation" placeholder="解析">
               <template #prepend>解析</template>
             </el-input>
+          </el-col>
+          <el-col :span="8">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="color: #606266; font-size: 14px; white-space: nowrap;">难度:</span>
+              <el-rate v-model="detailQuestion.difficulty" :max="5" show-score text-color="#ff9900" />
+            </div>
           </el-col>
         </el-row>
 
