@@ -29,16 +29,22 @@ DEFAULT_REVIEW_PROMPT = """你是一位教学助理，负责修正 OCR 识别的
 3. 选择题选项整理为 A. B. C. D. 格式，每行一个
 4. 表格内容用 Markdown 表格语法
 5. 横线/分隔线用 --- 表示
-6. 去除页眉页脚（如"第X页"、试卷标题等无关内容）
+6. 去除页眉页脚（如“第X页”、试卷标题等无关内容）
 7. 保持图片引用 ![...](...) 不变
 8. 保持题目原意不变，只修正排版和识别错误
 
+重要 — 字段分离规则：
+- content 只包含“题目本身”（已知条件、问题描述），绝对不要包含选项 A/B/C/D
+- 选项必须只放在 options 数组中，不要同时出现在 content 里
+- answer 只包含最终答案（如“A”“D”“-8”等）
+- explanation 包含完整的解题过程和推导步骤
+
 返回 JSON 格式（不要其他文字）：
 {
-  "content": "修正后的完整题目内容（Markdown）",
+  "content": "修正后的题目内容（仅题目，不含选项、不含解答）",
   "options": [{"label": "A", "content": "选项内容"}, ...],
-  "answer": "答案（如有）",
-  "explanation": "解析（如有）"
+  "answer": "最终答案（如 A、D 等）",
+  "explanation": "解题过程（如有）"
 }
 
 如果没有选项（非选择题），options 返回空数组 []。"""
@@ -152,6 +158,70 @@ def _encode_card_image(image_path: str | None) -> str | None:
     except Exception as e:
         logger.warning(f"Failed to encode card image: {e}")
         return None
+
+
+# ── Post-processing: strip options from content ─────────────────────
+
+def _strip_options_from_content(content: str, options: list) -> str:
+    """Remove option lines (A. xxx, B. xxx, etc.) from content to avoid duplication."""
+    if not content or not options:
+        return content
+
+    lines = content.split("\n")
+    # Build set of option content strings for matching
+    opt_contents = set()
+    for opt in options:
+        if isinstance(opt, dict):
+            c = opt.get("content", "").strip()
+            if c:
+                opt_contents.add(c)
+                # Also add variants without LaTeX wrappers
+                opt_contents.add(c.replace("$", ""))
+
+    # Also match lines starting with option labels
+    opt_labels = set()
+    for opt in options:
+        if isinstance(opt, dict):
+            opt_labels.add(opt.get("label", ""))
+
+    cleaned = []
+    skip_section = False
+    for line in lines:
+        stripped = line.strip()
+
+        # Skip lines that are purely an option (e.g. "A. $1+x^2=91$")
+        is_option_line = False
+        for label in opt_labels:
+            if stripped.startswith(f"{label}.") or stripped.startswith(f"{label} "):
+                is_option_line = True
+                break
+            # Also match Chinese-style: "A．xxx"
+            if stripped.startswith(f"{label}\uff0e"):
+                is_option_line = True
+                break
+
+        if is_option_line:
+            skip_section = True
+            continue
+
+        # Skip "选项" header line
+        if stripped in ("选项",):
+            skip_section = True
+            continue
+
+        # If we were in option section and hit a non-option line, resume
+        if skip_section and stripped and not is_option_line:
+            # Check if this line looks like it's back to normal content
+            # (not an option continuation)
+            skip_section = False
+
+        if not skip_section:
+            cleaned.append(line)
+
+    result = "\n".join(cleaned).strip()
+    # Collapse multiple blank lines
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result
 
 
 # ── Main correction function ──────────────────────────────────────────
@@ -281,6 +351,10 @@ async def correct_question(
         result_options = normalized
     else:
         result_options = options
+
+    # Post-process: strip option lines from content to avoid duplication
+    if result_options and isinstance(result_options, list):
+        result_content = _strip_options_from_content(result_content, result_options)
 
     return {
         "content": result_content,
