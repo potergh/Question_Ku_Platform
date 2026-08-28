@@ -2,110 +2,125 @@
   <div class="handout-view">
     <div class="handout-header">
       <h2>讲义编辑</h2>
-      <p class="subtitle">选择题目，拖拽排序，导出 PDF 讲义</p>
+      <p class="subtitle">选择题目，编辑知识备注，拖拽排序，导出 PDF</p>
     </div>
 
     <el-row :gutter="16">
       <!-- Left: Handout List -->
-      <el-col :span="7">
+      <el-col :span="6">
         <el-card class="handout-list-card">
           <template #header>
             <div class="card-header">
               <span>我的讲义</span>
               <el-button type="primary" size="small" @click="showCreateDialog = true">
-                <el-icon><Plus /></el-icon> 新建
+                <el-icon><Plus /></el-icon>
               </el-button>
             </div>
           </template>
           <div
             v-for="h in handouts"
             :key="h.id"
-            class="handout-item"
+            class="handout-list-item"
             :class="{ active: currentHandout?.id === h.id }"
             @click="selectHandout(h.id)"
           >
             <div class="h-title">{{ h.title }}</div>
             <div class="h-meta">
               <el-tag size="small" :type="h.status === 'exported' ? 'success' : 'info'">
-                {{ h.items?.length || 0 }} 题
+                {{ h.items?.length || 0 }} 项
               </el-tag>
               <span class="h-status">{{ statusText(h.status) }}</span>
             </div>
           </div>
-          <el-empty v-if="handouts.length === 0" description="暂无讲义" :image-size="60" />
+          <el-empty v-if="handouts.length === 0" description="暂无讲义" :image-size="50" />
         </el-card>
       </el-col>
 
       <!-- Right: Handout Editor -->
-      <el-col :span="17">
+      <el-col :span="18">
         <el-card v-if="currentHandout" class="editor-card">
           <template #header>
             <div class="editor-header">
-              <el-input
-                v-model="currentHandout.title"
-                style="width: 300px;"
-                @blur="saveHandoutMeta"
-              />
+              <el-input v-model="currentHandout.title" style="width: 260px;" @blur="saveHandoutMeta" />
               <div class="editor-actions">
-                <el-button @click="showAddDialog = true">
-                  <el-icon><Plus /></el-icon> 添加题目
-                </el-button>
-                <el-button
-                  type="primary"
-                  @click="exportPdf"
-                  :loading="exporting"
-                  :disabled="!currentHandout.items?.length"
-                >
+                <el-dropdown @command="addItem" trigger="click">
+                  <el-button size="small">
+                    <el-icon><Plus /></el-icon> 添加 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="question">从题库选题</el-dropdown-item>
+                      <el-dropdown-item command="section_title">章节标题</el-dropdown-item>
+                      <el-dropdown-item command="knowledge_note">知识备注 (Markdown)</el-dropdown-item>
+                      <el-dropdown-item command="example" divided>例题 (选题+标记)</el-dropdown-item>
+                      <el-dropdown-item command="exercise">练习 (选题+标记)</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+                <el-button type="primary" size="small" @click="exportPdf" :loading="exporting" :disabled="!currentHandout.items?.length">
                   <el-icon><Download /></el-icon> 导出 PDF
                 </el-button>
               </div>
             </div>
           </template>
 
+          <!-- Config bar -->
+          <div class="config-bar">
+            <el-checkbox v-model="handoutConfig.has_answer_section" @change="saveConfig">答案区独立展示</el-checkbox>
+            <el-checkbox v-model="handoutConfig.has_knowledge_summary" @change="saveConfig">包含知识总结</el-checkbox>
+          </div>
+
           <!-- Items (drag to reorder) -->
-          <draggable
-            v-model="currentHandout.items"
-            item-key="id"
-            handle=".drag-handle"
-            @end="onReorder"
-            class="items-list"
-          >
+          <draggable v-model="currentHandout.items" item-key="id" handle=".drag-handle" @end="onReorder" class="items-list">
             <template #item="{ element, index }">
               <div class="editor-item" :class="'type-' + element.item_type">
-                <div class="drag-handle">
-                  <el-icon><Rank /></el-icon>
-                </div>
-                <div class="item-content">
-                  <div class="item-type-badge">
-                    <el-tag size="small" :type="itemTypeTag(element.item_type)">
-                      {{ itemTypeText(element.item_type) }}
-                    </el-tag>
-                    <span v-if="element.item_type === 'question' && element.question_snapshot" class="q-num">
-                      第 {{ element.question_snapshot.question_number }} 题
-                    </span>
+                <div class="drag-handle"><el-icon><Rank /></el-icon></div>
+                <div class="item-body">
+                  <!-- Section Title -->
+                  <div v-if="element.item_type === 'section_title'" class="inline-edit">
+                    <el-icon style="color: #e6a23c;"><Menu /></el-icon>
+                    <el-input v-model="element.custom_content" size="small" placeholder="章节标题" @blur="saveItemContent(element)" style="font-weight: bold;" />
                   </div>
-                  <div class="item-preview" v-if="element.item_type === 'question' && element.question_snapshot">
-                    {{ truncate(element.question_snapshot.content, 120) }}
+
+                  <!-- Knowledge Note (Markdown) -->
+                  <div v-else-if="element.item_type === 'knowledge_note'" class="note-edit">
+                    <div class="item-type-label">
+                      <el-tag size="small" type="info">知识备注</el-tag>
+                      <el-switch v-model="element._editing" active-text="编辑" inactive-text="预览" size="small" />
+                    </div>
+                    <MdEditor
+                      v-if="element._editing"
+                      v-model="element.custom_content"
+                      :toolbars="mdToolbars"
+                      style="height: 200px;"
+                      @onSave="saveItemContent(element)"
+                    />
+                    <div v-else class="md-preview" v-html="renderMarkdown(element.custom_content)" @dblclick="element._editing = true"></div>
                   </div>
-                  <div class="item-preview" v-else-if="element.custom_content">
-                    {{ truncate(element.custom_content, 120) }}
+
+                  <!-- Question (example/exercise/plain question) -->
+                  <div v-else-if="element.item_type === 'question' || element.item_type === 'example' || element.item_type === 'exercise'" class="question-item">
+                    <div class="item-type-label">
+                      <el-tag size="small" :type="itemTypeTag(element.item_type)">{{ itemTypeText(element.item_type) }}</el-tag>
+                      <span v-if="element.question_snapshot" class="q-num">
+                        第 {{ element.question_snapshot.question_number }} 题
+                        <span v-if="element.question_snapshot.score">({{ element.question_snapshot.score }}分)</span>
+                      </span>
+                    </div>
+                    <div class="q-snapshot-content" v-if="element.question_snapshot">
+                      {{ truncate(element.question_snapshot.content, 200) }}
+                    </div>
+                    <div class="q-answer-toggle">
+                      <el-switch v-model="element.show_answer" active-text="显示答案" inactive-text="隐藏答案" size="small" @change="toggleAnswer(element)" />
+                    </div>
+                    <div class="q-answer-content" v-if="element.show_answer && element.question_snapshot">
+                      <div v-if="element.question_snapshot.answer"><b>答案：</b>{{ element.question_snapshot.answer }}</div>
+                      <div v-if="element.question_snapshot.explanation"><b>解析：</b>{{ element.question_snapshot.explanation }}</div>
+                    </div>
                   </div>
                 </div>
                 <div class="item-actions">
-                  <el-button
-                    v-if="element.item_type === 'question'"
-                    text
-                    size="small"
-                    @click="toggleAnswer(element)"
-                  >
-                    {{ element.show_answer ? '隐藏答案' : '显示答案' }}
-                  </el-button>
-                  <el-button
-                    text
-                    type="danger"
-                    size="small"
-                    @click="removeItem(element.id)"
-                  >
+                  <el-button text type="danger" size="small" @click="removeItem(element.id)">
                     <el-icon><Delete /></el-icon>
                   </el-button>
                 </div>
@@ -113,11 +128,7 @@
             </template>
           </draggable>
 
-          <el-empty
-            v-if="!currentHandout.items?.length"
-            description="点击「添加题目」开始编辑讲义"
-            :image-size="80"
-          />
+          <el-empty v-if="!currentHandout.items?.length" description="点击上方「添加」开始编辑讲义" :image-size="80" />
         </el-card>
 
         <el-card v-else class="no-selection">
@@ -133,7 +144,7 @@
           <el-input v-model="newHandoutTitle" placeholder="例：高二物理力学专题" />
         </el-form-item>
         <el-form-item label="学科">
-          <el-select v-model="newHandoutSubject" placeholder="选择学科">
+          <el-select v-model="newHandoutSubject">
             <el-option label="物理" value="physics" />
             <el-option label="数学" value="math" />
             <el-option label="化学" value="chemistry" />
@@ -147,386 +158,291 @@
     </el-dialog>
 
     <!-- Add Question Dialog -->
-    <el-dialog v-model="showAddDialog" title="添加题目到讲义" width="700px">
-      <el-tabs v-model="addTab">
-        <el-tab-pane label="从题库选择" name="questions">
-          <el-table
-            :data="availableQuestions"
-            @selection-change="onQuestionSelect"
-            height="400"
-            size="small"
-          >
-            <el-table-column type="selection" width="40" />
-            <el-table-column prop="question_number" label="#" width="50" />
-            <el-table-column prop="question_type" label="题型" width="80" />
-            <el-table-column label="内容">
-              <template #default="{ row }">
-                {{ truncate(row.content, 80) }}
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-tab-pane>
-        <el-tab-pane label="添加标题" name="title">
-          <el-input v-model="newSectionTitle" placeholder="例：一、力学基础" />
-        </el-tab-pane>
-        <el-tab-pane label="添加备注" name="note">
-          <el-input
-            v-model="newNoteContent"
-            type="textarea"
-            :rows="4"
-            placeholder="知识点总结、教学备注..."
-          />
-        </el-tab-pane>
-      </el-tabs>
+    <el-dialog v-model="showAddDialog" :title="addDialogTitle" width="700px">
+      <el-table :data="availableQuestions" @selection-change="onQuestionSelect" height="400" size="small">
+        <el-table-column type="selection" width="40" />
+        <el-table-column prop="question_number" label="#" width="50" />
+        <el-table-column prop="question_type" label="题型" width="80" />
+        <el-table-column label="内容">
+          <template #default="{ row }">{{ truncate(row.content, 80) }}</template>
+        </el-table-column>
+      </el-table>
       <template #footer>
         <el-button @click="showAddDialog = false">取消</el-button>
-        <el-button type="primary" @click="addSelectedItem">添加</el-button>
+        <el-button type="primary" @click="addSelectedQuestions">添加</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Add Section Title Dialog -->
+    <el-dialog v-model="showSectionDialog" title="添加章节标题" width="400px">
+      <el-input v-model="newSectionTitle" placeholder="例：一、力学基础" />
+      <template #footer>
+        <el-button @click="showSectionDialog = false">取消</el-button>
+        <el-button type="primary" @click="addSectionTitle" :disabled="!newSectionTitle">添加</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Add Knowledge Note Dialog -->
+    <el-dialog v-model="showNoteDialog" title="添加知识备注" width="600px">
+      <MdEditor v-model="newNoteContent" :toolbars="mdToolbars" style="height: 250px;" />
+      <template #footer>
+        <el-button @click="showNoteDialog = false">取消</el-button>
+        <el-button type="primary" @click="addKnowledgeNote" :disabled="!newNoteContent">添加</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 import draggable from 'vuedraggable'
+import { MdEditor } from 'md-editor-v3'
+import 'md-editor-v3/lib/style.css'
+
+const mdToolbars = ['bold', 'italic', '|', 'title', 'unordered-list', 'ordered-list', '|', 'link', 'code', '=', 'preview']
 
 const handouts = ref([])
 const currentHandout = ref(null)
+const handoutConfig = reactive({ has_answer_section: false, has_knowledge_summary: false })
 const showCreateDialog = ref(false)
 const showAddDialog = ref(false)
+const showSectionDialog = ref(false)
+const showNoteDialog = ref(false)
 const newHandoutTitle = ref('')
 const newHandoutSubject = ref('physics')
-const exporting = ref(false)
-const addTab = ref('questions')
-const availableQuestions = ref([])
-const selectedQuestions = ref([])
 const newSectionTitle = ref('')
 const newNoteContent = ref('')
+const exporting = ref(false)
+const availableQuestions = ref([])
+const selectedQuestions = ref([])
+const pendingItemType = ref('question')
 
+const addDialogTitle = computed(() => {
+  const map = { question: '从题库选题', example: '添加例题', exercise: '添加练习' }
+  return map[pendingItemType.value] || '选题'
+})
+
+// ── Handout CRUD ──
 const loadHandouts = async () => {
   try {
     const res = await axios.get('/api/handouts')
     handouts.value = res.data.handouts
-  } catch (e) {
-    console.error('Failed to load handouts:', e)
-  }
+  } catch (e) { console.error(e) }
 }
 
 const selectHandout = async (id) => {
   try {
     const res = await axios.get(`/api/handouts/${id}`)
     currentHandout.value = res.data
-  } catch (e) {
-    ElMessage.error('加载讲义失败')
-  }
+    // Add _editing flag to items
+    currentHandout.value.items.forEach(i => { i._editing = false })
+    // Load config
+    const cfg = currentHandout.value.config || {}
+    handoutConfig.has_answer_section = cfg.has_answer_section || false
+    handoutConfig.has_knowledge_summary = cfg.has_knowledge_summary || false
+  } catch (e) { ElMessage.error('加载失败') }
 }
 
 const createHandout = async () => {
   try {
-    const res = await axios.post('/api/handouts', {
-      title: newHandoutTitle.value,
-      subject: newHandoutSubject.value,
-    })
+    const res = await axios.post('/api/handouts', { title: newHandoutTitle.value, subject: newHandoutSubject.value })
     handouts.value.unshift(res.data)
     currentHandout.value = res.data
     showCreateDialog.value = false
     newHandoutTitle.value = ''
-    ElMessage.success('讲义已创建')
-  } catch (e) {
-    ElMessage.error('创建失败')
-  }
+    ElMessage.success('已创建')
+  } catch (e) { ElMessage.error('创建失败') }
 }
 
 const saveHandoutMeta = async () => {
   if (!currentHandout.value) return
+  try { await axios.put(`/api/handouts/${currentHandout.value.id}`, { title: currentHandout.value.title }) } catch (e) {}
+}
+
+const saveConfig = async () => {
+  if (!currentHandout.value) return
   try {
     await axios.put(`/api/handouts/${currentHandout.value.id}`, {
-      title: currentHandout.value.title,
+      config: { has_answer_section: handoutConfig.has_answer_section, has_knowledge_summary: handoutConfig.has_knowledge_summary }
     })
-  } catch (e) { /* silent */ }
+  } catch (e) {}
+}
+
+// ── Add Items ──
+const addItem = (type) => {
+  if (type === 'section_title') { showSectionDialog.value = true; return }
+  if (type === 'knowledge_note') { showNoteDialog.value = true; return }
+  pendingItemType.value = type
+  loadQuestions()
+  showAddDialog.value = true
 }
 
 const loadQuestions = async () => {
   try {
-    const res = await axios.get('/api/questions', { params: { review_status: 'approved', page_size: 200 } })
-    availableQuestions.value = res.data.questions
-  } catch (e) {
-    // Also load pending questions
     const res = await axios.get('/api/questions', { params: { page_size: 200 } })
     availableQuestions.value = res.data.questions
-  }
+  } catch (e) { availableQuestions.value = [] }
 }
 
-const onQuestionSelect = (rows) => {
-  selectedQuestions.value = rows
-}
+const onQuestionSelect = (rows) => { selectedQuestions.value = rows }
 
-const addSelectedItem = async () => {
+const addSelectedQuestions = async () => {
   if (!currentHandout.value) return
-
-  if (addTab.value === 'questions') {
-    for (const q of selectedQuestions.value) {
-      await axios.post(`/api/handouts/${currentHandout.value.id}/items`, {
-        item_type: 'question',
-        question_id: q.id,
-      })
-    }
-    if (selectedQuestions.value.length) {
-      ElMessage.success(`已添加 ${selectedQuestions.value.length} 题`)
-    }
-  } else if (addTab.value === 'title') {
-    if (newSectionTitle.value) {
-      await axios.post(`/api/handouts/${currentHandout.value.id}/items`, {
-        item_type: 'section_title',
-        custom_content: newSectionTitle.value,
-      })
-      newSectionTitle.value = ''
-    }
-  } else if (addTab.value === 'note') {
-    if (newNoteContent.value) {
-      await axios.post(`/api/handouts/${currentHandout.value.id}/items`, {
-        item_type: 'knowledge_note',
-        custom_content: newNoteContent.value,
-      })
-      newNoteContent.value = ''
-    }
+  for (const q of selectedQuestions.value) {
+    await axios.post(`/api/handouts/${currentHandout.value.id}/items`, {
+      item_type: pendingItemType.value === 'question' ? 'question' : pendingItemType.value,
+      question_id: q.id,
+    })
   }
-
+  if (selectedQuestions.value.length) ElMessage.success(`已添加 ${selectedQuestions.value.length} 题`)
   showAddDialog.value = false
   selectedQuestions.value = []
   await selectHandout(currentHandout.value.id)
 }
 
+const addSectionTitle = async () => {
+  if (!currentHandout.value || !newSectionTitle.value) return
+  await axios.post(`/api/handouts/${currentHandout.value.id}/items`, {
+    item_type: 'section_title', custom_content: newSectionTitle.value,
+  })
+  newSectionTitle.value = ''
+  showSectionDialog.value = false
+  await selectHandout(currentHandout.value.id)
+}
+
+const addKnowledgeNote = async () => {
+  if (!currentHandout.value || !newNoteContent.value) return
+  await axios.post(`/api/handouts/${currentHandout.value.id}/items`, {
+    item_type: 'knowledge_note', custom_content: newNoteContent.value,
+  })
+  newNoteContent.value = ''
+  showNoteDialog.value = false
+  await selectHandout(currentHandout.value.id)
+}
+
+// ── Item Ops ──
 const removeItem = async (itemId) => {
   try {
     await axios.delete(`/api/handouts/${currentHandout.value.id}/items/${itemId}`)
     currentHandout.value.items = currentHandout.value.items.filter(i => i.id !== itemId)
-  } catch (e) {
-    ElMessage.error('删除失败')
-  }
+  } catch (e) { ElMessage.error('删除失败') }
 }
 
 const toggleAnswer = async (item) => {
+  try { await axios.post(`/api/handouts/${currentHandout.value.id}/items/${item.id}/toggle-answer`) } catch (e) {}
+}
+
+const saveItemContent = async (item) => {
   try {
-    const res = await axios.post(`/api/handouts/${currentHandout.value.id}/items/${item.id}/toggle-answer`)
-    item.show_answer = res.data.show_answer
-  } catch (e) { /* silent */ }
+    await axios.put(`/api/handouts/${currentHandout.value.id}/items/${item.id}`, {
+      custom_content: item.custom_content,
+    })
+  } catch (e) {}
 }
 
 const onReorder = async () => {
   if (!currentHandout.value) return
-  const itemIds = currentHandout.value.items.map(i => i.id)
-  try {
-    await axios.post(`/api/handouts/${currentHandout.value.id}/reorder`, { item_ids: itemIds })
-  } catch (e) {
-    ElMessage.error('排序失败')
-  }
+  const ids = currentHandout.value.items.map(i => i.id)
+  try { await axios.post(`/api/handouts/${currentHandout.value.id}/reorder`, { item_ids: ids }) } catch (e) {}
 }
 
 const exportPdf = async () => {
   exporting.value = true
   try {
-    const res = await axios.post(`/api/handouts/${currentHandout.value.id}/export`, null, {
-      responseType: 'blob',
-    })
-    // Download the blob
+    const res = await axios.post(`/api/handouts/${currentHandout.value.id}/export`, null, { responseType: 'blob' })
     const url = window.URL.createObjectURL(new Blob([res.data]))
-    const link = document.createElement('a')
-    link.href = url
-    link.setAttribute('download', `${currentHandout.value.title}.pdf`)
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.URL.revokeObjectURL(url)
+    const a = document.createElement('a'); a.href = url; a.download = `${currentHandout.value.title}.pdf`
+    document.body.appendChild(a); a.click(); a.remove(); window.URL.revokeObjectURL(url)
     currentHandout.value.status = 'exported'
     ElMessage.success('PDF 已导出')
-  } catch (e) {
-    ElMessage.error('导出失败')
-  } finally {
-    exporting.value = false
-  }
+  } catch (e) { ElMessage.error('导出失败') } finally { exporting.value = false }
 }
 
-const truncate = (text, len) => {
-  if (!text) return ''
-  return text.length > len ? text.slice(0, len) + '...' : text
+// ── Helpers ──
+const truncate = (t, n) => t ? (t.length > n ? t.slice(0, n) + '...' : t) : ''
+const statusText = (s) => ({ draft: '草稿', ready: '待导出', exported: '已导出' })[s] || s
+const itemTypeText = (t) => ({ question: '题目', section_title: '标题', knowledge_note: '备注', example: '例题', exercise: '练习' })[t] || t
+const itemTypeTag = (t) => ({ question: '', section_title: 'warning', knowledge_note: 'info', example: 'success', exercise: 'danger' })[t] || ''
+
+const renderMarkdown = (text) => {
+  if (!text) return '<span style="color:#909399">双击编辑...</span>'
+  // Simple markdown to HTML for preview
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/\*(.+?)\*/g, '<i>$1</i>')
+    .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/\n/g, '<br>')
 }
 
-const statusText = (s) => {
-  const map = { draft: '草稿', ready: '待导出', exported: '已导出' }
-  return map[s] || s
-}
-
-const itemTypeText = (t) => {
-  const map = { question: '题目', section_title: '标题', knowledge_note: '备注', example: '例题', exercise: '练习' }
-  return map[t] || t
-}
-
-const itemTypeTag = (t) => {
-  const map = { question: '', section_title: 'warning', knowledge_note: 'info' }
-  return map[t] || ''
-}
-
-watch(showAddDialog, (val) => {
-  if (val) loadQuestions()
-})
-
-onMounted(() => {
-  loadHandouts()
-})
+onMounted(() => { loadHandouts() })
 </script>
 
 <style scoped>
-.handout-view {
-  max-width: 1200px;
-  margin: 0 auto;
+.handout-view { max-width: 1200px; margin: 0 auto; }
+.handout-header { margin-bottom: 16px; }
+.subtitle { color: #909399; margin-top: 4px; }
+
+.handout-list-card { height: calc(100vh - 180px); overflow-y: auto; }
+.card-header { display: flex; justify-content: space-between; align-items: center; }
+
+.handout-list-item {
+  padding: 10px; border-radius: 6px; cursor: pointer; margin-bottom: 4px;
+  border: 1px solid transparent; transition: all 0.2s;
+}
+.handout-list-item:hover { background: #f5f7fa; }
+.handout-list-item.active { background: #ecf5ff; border-color: #409eff; }
+.h-title { font-weight: 500; margin-bottom: 4px; font-size: 14px; }
+.h-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #909399; }
+
+.editor-card { min-height: calc(100vh - 180px); }
+.editor-header { display: flex; justify-content: space-between; align-items: center; }
+.editor-actions { display: flex; gap: 8px; }
+
+.config-bar {
+  display: flex; gap: 16px; padding: 8px 12px; background: #fafafa;
+  border: 1px solid #ebeef5; border-radius: 6px; margin-bottom: 12px;
 }
 
-.handout-header {
-  margin-bottom: 16px;
-}
-
-.subtitle {
-  color: #909399;
-  margin-top: 4px;
-}
-
-.handout-list-card {
-  height: calc(100vh - 180px);
-  overflow-y: auto;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.handout-item {
-  padding: 10px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  margin-bottom: 6px;
-  border: 1px solid transparent;
-  transition: all 0.2s;
-}
-
-.handout-item:hover {
-  background: #f5f7fa;
-}
-
-.handout-item.active {
-  background: #ecf5ff;
-  border-color: #409eff;
-}
-
-.h-title {
-  font-weight: 500;
-  margin-bottom: 4px;
-}
-
-.h-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: #909399;
-}
-
-.editor-card {
-  min-height: calc(100vh - 180px);
-}
-
-.editor-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.editor-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.items-list {
-  min-height: 200px;
-}
+.items-list { min-height: 200px; }
 
 .editor-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid #e4e7ed;
-  border-radius: 6px;
-  margin-bottom: 8px;
-  background: #fff;
-  transition: box-shadow 0.2s;
+  display: flex; gap: 8px; padding: 10px; border: 1px solid #e4e7ed;
+  border-radius: 6px; margin-bottom: 8px; background: #fff; transition: box-shadow 0.2s;
+}
+.editor-item:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.editor-item.type-section_title { background: #fdf6ec; border-color: #f5dab1; }
+.editor-item.type-knowledge_note { background: #f0f9ff; border-color: #b3d8ff; }
+.editor-item.type-example { border-left: 3px solid #67c23a; }
+.editor-item.type-exercise { border-left: 3px solid #f56c6c; }
+
+.drag-handle { cursor: grab; color: #c0c4cc; font-size: 18px; padding: 4px; flex-shrink: 0; }
+.drag-handle:active { cursor: grabbing; }
+
+.item-body { flex: 1; min-width: 0; }
+.item-actions { flex-shrink: 0; }
+
+.inline-edit { display: flex; align-items: center; gap: 8px; }
+.item-type-label { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.q-num { font-size: 12px; color: #606266; }
+
+.q-snapshot-content { font-size: 13px; color: #606266; margin-bottom: 6px; }
+.q-answer-toggle { margin-bottom: 4px; }
+.q-answer-content {
+  padding: 6px 10px; background: #f0f9eb; border-radius: 4px;
+  font-size: 13px; color: #606266;
 }
 
-.editor-item:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+.md-preview {
+  min-height: 60px; padding: 8px; border: 1px dashed #dcdfe6;
+  border-radius: 4px; cursor: pointer; font-size: 14px; line-height: 1.6;
 }
+.md-preview:hover { border-color: #409eff; }
 
-.editor-item.type-section_title {
-  background: #fdf6ec;
-  border-color: #f5dab1;
-}
+.note-edit { }
 
-.editor-item.type-knowledge_note {
-  background: #ecf5ff;
-  border-color: #b3d8ff;
-}
-
-.drag-handle {
-  cursor: grab;
-  color: #c0c4cc;
-  font-size: 18px;
-  padding: 4px;
-}
-
-.drag-handle:active {
-  cursor: grabbing;
-}
-
-.item-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.item-type-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-
-.q-num {
-  font-size: 12px;
-  color: #606266;
-}
-
-.item-preview {
-  font-size: 13px;
-  color: #606266;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.item-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.no-selection {
-  min-height: calc(100vh - 180px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+.no-selection { min-height: calc(100vh - 180px); display: flex; align-items: center; justify-content: center; }
 </style>

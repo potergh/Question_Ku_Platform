@@ -14,7 +14,7 @@ from app.models import Handout, HandoutItem, Question
 from app.schemas.handout import (
     HandoutResponse, HandoutCreate, HandoutUpdate,
     HandoutListResponse, HandoutItemResponse,
-    AddItemRequest, ReorderRequest,
+    AddItemRequest, UpdateItemRequest, ReorderRequest,
 )
 
 router = APIRouter()
@@ -104,9 +104,9 @@ async def add_item(
     max_order = result.scalar() or 0
     next_order = max_order + 1
 
-    # Build snapshot if adding a question
+    # Build snapshot if adding a question-based item
     snapshot = None
-    if data.item_type == "question" and data.question_id:
+    if data.item_type in ("question", "example", "exercise") and data.question_id:
         question = await db.get(Question, data.question_id)
         if not question or question.is_deleted:
             raise HTTPException(404, "Question not found")
@@ -130,6 +130,21 @@ async def add_item(
         show_answer=data.show_answer,
     )
     db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+@router.put("/api/handouts/{handout_id}/items/{item_id}", response_model=HandoutItemResponse)
+async def update_item(
+    handout_id: str, item_id: str, data: UpdateItemRequest, db: AsyncSession = Depends(get_db)
+):
+    """Update an item's content or config."""
+    item = await db.get(HandoutItem, item_id)
+    if not item or item.handout_id != handout_id:
+        raise HTTPException(404, "Item not found")
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(item, field, value)
     await db.commit()
     await db.refresh(item)
     return item
@@ -235,7 +250,7 @@ def _render_handout_html(handout: Handout) -> str:
     for item in sorted(handout.items, key=lambda i: i.order):
         if item.item_type == "section_title":
             items_html.append(f'<h2 class="section-title">{item.custom_content or ""}</h2>')
-        elif item.item_type == "question" and item.question_snapshot:
+        elif item.item_type in ("question", "example", "exercise") and item.question_snapshot:
             snap = item.question_snapshot
             content = snap.get("content", "") or ""
             # Escape HTML but preserve Markdown structure

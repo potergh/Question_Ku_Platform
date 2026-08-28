@@ -50,10 +50,16 @@ class HandoutUpdate(BaseModel):
 
 
 class AddItemRequest(BaseModel):
-    item_type: str = "question"  # question / section_title / knowledge_note
+    item_type: str = "question"  # question / section_title / knowledge_note / example / exercise
     question_id: str | None = None
     custom_content: str | None = None
     show_answer: bool = True
+
+
+class UpdateItemRequest(BaseModel):
+    custom_content: str | None = None
+    show_answer: bool | None = None
+    config: dict | None = None
 
 
 class ReorderRequest(BaseModel):
