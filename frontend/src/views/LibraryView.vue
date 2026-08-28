@@ -93,7 +93,7 @@
         </div>
 
         <div class="q-card-body" @click.stop="openDetail(q)">
-          <div class="q-content-preview" v-html="renderContentPreview(q.content, 150)"></div>
+          <div class="q-content-preview" v-html="renderPreview(q.content, 150)"></div>
           <div class="q-options-preview" v-if="q.options?.length">
             <div v-for="opt in q.options.slice(0, 4)" :key="opt.label" class="opt-line">
               {{ opt.label }}. {{ truncate(opt.content, 40) }}
@@ -144,8 +144,14 @@
           </el-descriptions-item>
         </el-descriptions>
 
-        <h4 style="margin: 16px 0 8px;">题目内容</h4>
-        <el-input v-model="detailQuestion.content" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" />
+        <h4 style="margin: 16px 0 8px;">
+          题目内容
+          <el-switch v-model="detailPreviewMode" active-text="预览" inactive-text="编辑" size="small" style="margin-left: 12px;" />
+        </h4>
+        <!-- Rendered preview (with LaTeX + images) -->
+        <div v-if="detailPreviewMode" class="rendered-preview" v-html="renderFullContent(detailQuestion.content)"></div>
+        <!-- Raw editor -->
+        <el-input v-else v-model="detailQuestion.content" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" />
 
         <div v-if="detailQuestion.options?.length" style="margin-top: 12px;">
           <h4>选项</h4>
@@ -208,6 +214,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
+import { renderFullContent, renderPreview } from '../utils/render.js'
 
 const questions = ref([])
 const sources = ref([])
@@ -218,6 +225,7 @@ const pageSize = 50
 const selectedIds = reactive(new Set())
 const showDetail = ref(false)
 const detailQuestion = ref(null)
+const detailPreviewMode = ref(true) // true = preview, false = edit
 const aiAccepted = ref(false)
 const showTagDialog = ref(false)
 const selectedTagIds = ref([])
@@ -270,6 +278,7 @@ const toggleSelect = (id) => {
 
 const openDetail = (q) => {
   detailQuestion.value = JSON.parse(JSON.stringify(q))
+  detailPreviewMode.value = true
   aiAccepted.value = false
   showDetail.value = true
 }
@@ -355,24 +364,6 @@ const addToHandout = () => {
 const truncate = (text, len) => {
   if (!text) return ''
   return text.length > len ? text.slice(0, len) + '...' : text
-}
-
-// Render content preview with images
-const renderContentPreview = (content, maxLen) => {
-  if (!content) return ''
-  // Extract and render images first
-  const images = []
-  let text = content.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
-    images.push(`<img src="${url}" alt="${alt}" style="max-width:120px;max-height:80px;margin:2px;border-radius:3px;vertical-align:middle;" />`)
-    return ''
-  })
-  // Strip remaining markdown
-  text = text.replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1')
-    .replace(/^#{1,4}\s+/gm, '').replace(/\$([^$]+)\$/g, '$1')
-  // Truncate text
-  if (text.length > maxLen) text = text.slice(0, maxLen) + '...'
-  // Combine text + images
-  return text + (images.length ? '<div style="margin-top:4px;">' + images.join('') + '</div>' : '')
 }
 
 const reviewTagType = (s) => ({ pending: 'warning', approved: 'success', rejected: 'danger' })[s] || 'info'
@@ -463,5 +454,32 @@ onMounted(() => {
 .ai-suggest-body {
   display: flex; gap: 16px; font-size: 13px; color: #606266;
   margin-bottom: 8px;
+}
+
+/* Rendered preview in detail drawer */
+.rendered-preview {
+  padding: 12px 16px;
+  background: #fafafa;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  line-height: 1.8;
+  font-size: 14px;
+  color: #303133;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+.rendered-preview :deep(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 6px 0;
+  display: block;
+}
+.rendered-preview :deep(.katex) {
+  font-size: 1.05em;
+}
+.rendered-preview :deep(.katex-display) {
+  margin: 12px 0;
+  overflow-x: auto;
 }
 </style>

@@ -288,6 +288,7 @@ import axios from 'axios'
 import draggable from 'vuedraggable'
 import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
+import { renderFullContent } from '../utils/render.js'
 
 const mdToolbars = ['bold', 'italic', '|', 'title', 'unordered-list', 'ordered-list', '|', 'link', 'code', '=', 'preview']
 
@@ -571,15 +572,7 @@ const itemTypeTag = (t) => ({ question: '', section_title: 'warning', knowledge_
 
 const renderMarkdown = (text) => {
   if (!text) return '<span style="color:#909399">双击编辑...</span>'
-  // Simple markdown to HTML for preview
-  return text
-    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-    .replace(/\*(.+?)\*/g, '<i>$1</i>')
-    .replace(/^### (.+)$/gm, '<h4>$1</h4>')
-    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^- (.+)$/gm, '<li>$1</li>')
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:100%;height:auto;margin:4px 0;border-radius:4px;" />')
-    .replace(/\n/g, '<br>')
+  return renderFullContent(text, { emptyText: '<span style="color:#909399">双击编辑...</span>' })
 }
 
 // Resolve asset:// URLs in question snapshot content
@@ -594,7 +587,7 @@ const renderSnapshotContent = (snapshot) => {
   if (!snapshot || !snapshot.content) return ''
   const sourceId = snapshot.source_id || ''
   const resolved = resolveAssetUrls(snapshot.content, sourceId)
-  return renderMarkdown(resolved)
+  return renderFullContent(resolved)
 }
 
 onMounted(() => { loadHandouts() })
@@ -685,5 +678,25 @@ onMounted(() => { loadHandouts() })
   max-height: 200px; overflow-y: auto; padding: 10px;
   border: 1px solid #e4e7ed; border-radius: 4px; margin-top: 12px;
   font-size: 13px; line-height: 1.6;
+}
+
+/* Rendered content: images + KaTeX */
+.md-preview :deep(img),
+.q-snapshot-content :deep(img),
+.generated-note-preview :deep(img),
+.result-md :deep(img) {
+  max-width: 100%; height: auto; border-radius: 4px; margin: 6px 0; display: block;
+}
+.md-preview :deep(.katex),
+.q-snapshot-content :deep(.katex),
+.generated-note-preview :deep(.katex),
+.result-md :deep(.katex) {
+  font-size: 1.05em;
+}
+.md-preview :deep(.katex-display),
+.q-snapshot-content :deep(.katex-display),
+.generated-note-preview :deep(.katex-display),
+.result-md :deep(.katex-display) {
+  margin: 10px 0; overflow-x: auto;
 }
 </style>
