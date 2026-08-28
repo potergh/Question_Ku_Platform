@@ -33,7 +33,6 @@
               <el-option label="数学" value="math" />
               <el-option label="化学" value="chemistry" />
               <el-option label="英语" value="english" />
-              <el-option label="语文" value="chinese" />
             </el-select>
           </div>
         </template>
