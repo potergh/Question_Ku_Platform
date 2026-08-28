@@ -24,6 +24,32 @@ async def lifespan(app: FastAPI):
     # Startup
     settings.ensure_dirs()
     await init_db()
+
+    # Clean up stale jobs (from previous server crash/restart)
+    from app.database import async_session_factory
+    from app.models import Job, Source
+    from sqlalchemy import select
+    from datetime import datetime
+
+    async with async_session_factory() as db:
+        # Mark running/queued jobs as failed
+        result = await db.execute(
+            select(Job).where(Job.status.in_(["running", "queued"]))
+        )
+        stale_jobs = result.scalars().all()
+        for job in stale_jobs:
+            job.status = "failed"
+            job.error_message = "服务器重启，任务中断"
+            job.finished_at = datetime.now()
+            # Also mark corresponding source as error
+            if job.source_id:
+                source = await db.get(Source, job.source_id)
+                if source and source.ocr_status == "pending":
+                    source.ocr_status = "error"
+        if stale_jobs:
+            await db.commit()
+            logging.info(f"Cleaned up {len(stale_jobs)} stale jobs")
+
     yield
     # Shutdown
 

@@ -30,11 +30,25 @@ async def process_pdf_async(source_id: str, pdf_path: str, job_id: str):
         if job:
             job.status = "running"
             job.started_at = datetime.now()
+            job.progress = 5.0
+            await db.commit()
+
+        # Mark source as processing
+        source = await db.get(Source, source_id)
+        if source:
+            source.ocr_status = "processing"
             await db.commit()
 
         try:
             # Run OCR in thread pool (it's CPU-bound)
             loop = asyncio.get_event_loop()
+
+            # Update progress: OCR starting
+            job = await db.get(Job, job_id)
+            if job:
+                job.progress = 10.0
+                await db.commit()
+
             result = await loop.run_in_executor(
                 None,
                 lambda: _adapter.process_pdf(
@@ -42,6 +56,12 @@ async def process_pdf_async(source_id: str, pdf_path: str, job_id: str):
                     settings.ocr_output_dir,
                 ),
             )
+
+            # Update progress: OCR done, saving to DB
+            job = await db.get(Job, job_id)
+            if job:
+                job.progress = 70.0
+                await db.commit()
 
             # Update source
             source = await db.get(Source, source_id)
@@ -72,7 +92,14 @@ async def process_pdf_async(source_id: str, pdf_path: str, job_id: str):
                 )
                 db.add(question)
 
+            # Update progress: questions saved
+            job = await db.get(Job, job_id)
+            if job:
+                job.progress = 90.0
+                await db.commit()
+
             # Mark job as success
+            job = await db.get(Job, job_id)
             if job:
                 job.status = "success"
                 job.progress = 100.0

@@ -15,5 +15,8 @@ class JobResponse(BaseModel):
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+    # Denormalized from source for display
+    filename: str | None = None
+    ocr_status: str | None = None
 
     model_config = {"from_attributes": True}

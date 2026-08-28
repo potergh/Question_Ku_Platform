@@ -96,9 +96,20 @@ async def delete_source(source_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/api/jobs", response_model=list[JobResponse])
 async def list_jobs(db: AsyncSession = Depends(get_db)):
-    """List all jobs (OCR, AI, export)."""
-    result = await db.execute(select(Job).order_by(Job.created_at.desc()).limit(50))
-    return result.scalars().all()
+    """List all jobs (OCR, AI, export) with source info."""
+    from sqlalchemy.orm import selectinload
+    result = await db.execute(
+        select(Job).options(selectinload(Job.source)).order_by(Job.created_at.desc()).limit(50)
+    )
+    jobs = result.scalars().all()
+    response = []
+    for j in jobs:
+        data = JobResponse.model_validate(j)
+        if j.source:
+            data.filename = j.source.filename
+            data.ocr_status = j.source.ocr_status
+        response.append(data)
+    return response
 
 
 @router.get("/api/jobs/{job_id}", response_model=JobResponse)
@@ -108,3 +119,30 @@ async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
     if not job:
         raise HTTPException(404, "Job not found")
     return job
+
+
+@router.post("/api/sources/{source_id}/retry")
+async def retry_source(source_id: str, db: AsyncSession = Depends(get_db)):
+    """Retry OCR for a failed source."""
+    source = await db.get(Source, source_id)
+    if not source:
+        raise HTTPException(404, "Source not found")
+    if source.ocr_status not in ("error", "pending"):
+        raise HTTPException(400, "只能重试失败的任务")
+
+    # Reset source status
+    source.ocr_status = "pending"
+    source.question_count = 0
+    source.review_count = 0
+
+    # Create new job
+    job = Job(job_type="ocr", source_id=source.id, status="queued")
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+
+    # Trigger OCR in background
+    import asyncio
+    asyncio.create_task(process_pdf_async(source.id, source.file_path, job.id))
+
+    return {"ok": True, "job_id": job.id}
