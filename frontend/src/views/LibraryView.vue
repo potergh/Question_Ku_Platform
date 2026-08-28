@@ -53,6 +53,16 @@
           <el-button @click="loadQuestions"><el-icon><Refresh /></el-icon></el-button>
         </el-col>
       </el-row>
+      <el-row style="margin-top: 8px;" :gutter="12" align="middle">
+        <el-col :span="8">
+          <el-select v-model="filters.tag_ids" multiple placeholder="按标签筛选" clearable filterable @change="loadQuestions" style="width: 100%;">
+            <el-option v-for="t in allTags" :key="t.id" :label="`${categoryText(t.category)} / ${t.name}`" :value="t.id" />
+          </el-select>
+        </el-col>
+        <el-col :span="4">
+          <el-button size="small" @click="showTagMgmt = true"><el-icon><PriceTag /></el-icon> 标签管理</el-button>
+        </el-col>
+      </el-row>
     </el-card>
 
     <!-- Batch Actions Bar -->
@@ -61,6 +71,7 @@
       <el-button type="success" size="small" @click="batchApprove">批量通过</el-button>
       <el-button type="warning" size="small" @click="batchAICorrect">AI 批量修正</el-button>
       <el-button type="info" size="small" @click="showTagDialog = true">批量打标签</el-button>
+      <el-button type="warning" size="small" @click="batchAITag">AI 批量打标</el-button>
       <el-button type="primary" size="small" @click="addToHandout">加入讲义</el-button>
       <el-button type="danger" size="small" @click="batchDelete">批量删除</el-button>
       <el-button text size="small" @click="selectedIds.clear()">取消选择</el-button>
@@ -195,6 +206,24 @@
           </el-col>
         </el-row>
 
+        <!-- Tags Section -->
+        <div style="margin-top: 16px;">
+          <h4 style="margin-bottom: 8px;">标签</h4>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px;">
+            <el-tag v-for="t in detailQuestion.tags" :key="t.id" :color="t.color" effect="dark" closable @close="removeTagFromDetail(t.id)" style="margin: 2px;">
+              {{ t.name }}
+            </el-tag>
+            <span v-if="!detailQuestion.tags?.length" style="color: #c0c4cc; font-size: 13px;">暂无标签</span>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <el-select v-model="detailTagSelect" placeholder="添加标签" filterable size="small" style="width: 200px;">
+              <el-option v-for="t in availableTagsForDetail" :key="t.id" :label="`${categoryText(t.category)} / ${t.name}`" :value="t.id" />
+            </el-select>
+            <el-button size="small" @click="addTagToDetail" :disabled="!detailTagSelect">添加</el-button>
+            <el-button size="small" type="warning" @click="aiTagSingle" :loading="aiTagging">AI 打标</el-button>
+          </div>
+        </div>
+
         <div style="margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap;">
           <el-button type="primary" @click="saveDetail">保存</el-button>
           <el-button type="warning" @click="aiCorrectSingle" :loading="aiCorrecting">
@@ -220,6 +249,55 @@
         </div>
       </template>
     </el-drawer>
+
+    <!-- Tag Management Dialog -->
+    <el-dialog v-model="showTagMgmt" title="标签管理" width="550px">
+      <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+        <el-tabs v-model="mgmtCategory" style="flex: 1;" @tab-change="() => {}">
+          <el-tab-pane label="知识点" name="knowledge" />
+          <el-tab-pane label="技能" name="skill" />
+          <el-tab-pane label="错因" name="error_type" />
+          <el-tab-pane label="自定义" name="custom" />
+        </el-tabs>
+        <el-button type="primary" size="small" @click="showCreateTag = true">
+          <el-icon><Plus /></el-icon> 新增
+        </el-button>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+        <div v-for="t in filteredMgmtTags" :key="t.id" class="mgmt-tag">
+          <span>{{ t.name }}</span>
+          <span class="mgmt-tag-actions">
+            <el-button text size="small" @click="editTagItem(t)">编辑</el-button>
+            <el-button text type="danger" size="small" @click="deleteTagItem(t)">删除</el-button>
+          </span>
+        </div>
+      </div>
+      <el-empty v-if="filteredMgmtTags.length === 0" description="该分类暂无标签" :image-size="40" />
+    </el-dialog>
+
+    <!-- Create/Edit Tag Dialog -->
+    <el-dialog v-model="showCreateTag" :title="editingTagItem ? '编辑标签' : '新增标签'" width="400px" append-to-body>
+      <el-form @submit.prevent="saveTagItem">
+        <el-form-item label="名称">
+          <el-input v-model="tagForm.name" placeholder="标签名称" />
+        </el-form-item>
+        <el-form-item label="分类">
+          <el-select v-model="tagForm.category" :disabled="!!editingTagItem">
+            <el-option label="知识点" value="knowledge" />
+            <el-option label="技能" value="skill" />
+            <el-option label="错因" value="error_type" />
+            <el-option label="自定义" value="custom" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="颜色（可选）">
+          <el-color-picker v-model="tagForm.color" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showCreateTag = false; editingTagItem = null">取消</el-button>
+        <el-button type="primary" @click="saveTagItem" :disabled="!tagForm.name">保存</el-button>
+      </template>
+    </el-dialog>
 
     <!-- Batch Tag Dialog -->
     <el-dialog v-model="showTagDialog" title="批量打标签" width="400px">
@@ -320,6 +398,15 @@ const aiAccepted = ref(false)
 const showTagDialog = ref(false)
 const selectedTagIds = ref([])
 
+// Tag management state
+const showTagMgmt = ref(false)
+const showCreateTag = ref(false)
+const editingTagItem = ref(null)
+const mgmtCategory = ref('knowledge')
+const tagForm = reactive({ name: '', category: 'knowledge', color: null })
+const detailTagSelect = ref('')
+const aiTagging = ref(false)
+
 // AI correction state
 const aiCorrecting = ref(false)
 const showAIPreview = ref(false)
@@ -338,6 +425,7 @@ const filters = reactive({
   review_status: '',
   difficulty: null,
   source_id: '',
+  tag_ids: [],
 })
 
 // Dynamic subjects from API
@@ -405,6 +493,7 @@ const loadQuestions = async () => {
     if (filters.review_status) params.review_status = filters.review_status
     if (filters.difficulty) params.difficulty = filters.difficulty
     if (filters.source_id) params.source_id = filters.source_id
+    if (filters.tag_ids?.length) params.tag_ids = filters.tag_ids.join(',')
 
     const res = await axios.get('/api/questions', { params })
     questions.value = res.data.questions
@@ -601,6 +690,129 @@ const reviewTagType = (s) => ({ pending: 'warning', approved: 'success', rejecte
 const reviewText = (s) => ({ pending: '待审核', approved: '已通过', rejected: '已驳回' })[s] || s
 const categoryText = (c) => ({ knowledge: '知识点', skill: '技能', error_type: '错因', custom: '自定义' })[c] || c
 
+// ── Tag Management ──
+
+const filteredMgmtTags = computed(() => allTags.value.filter(t => t.category === mgmtCategory.value))
+
+const availableTagsForDetail = computed(() => {
+  if (!detailQuestion.value) return allTags.value
+  const currentIds = new Set(detailQuestion.value.tags?.map(t => t.id) || [])
+  return allTags.value.filter(t => !currentIds.has(t.id))
+})
+
+const addTagToDetail = async () => {
+  if (!detailTagSelect.value || !detailQuestion.value) return
+  try {
+    await axios.post('/api/questions/batch-tag', {
+      question_ids: [detailQuestion.value.id],
+      tag_ids: [detailTagSelect.value],
+    })
+    const tag = allTags.value.find(t => t.id === detailTagSelect.value)
+    if (tag && !detailQuestion.value.tags) detailQuestion.value.tags = []
+    if (tag) detailQuestion.value.tags.push({ id: tag.id, name: tag.name, category: tag.category, color: tag.color })
+    detailTagSelect.value = ''
+    loadQuestions()
+  } catch (e) {
+    ElMessage.error('添加标签失败')
+  }
+}
+
+const removeTagFromDetail = async (tagId) => {
+  if (!detailQuestion.value) return
+  try {
+    await axios.post('/api/questions/batch-untag', {
+      question_ids: [detailQuestion.value.id],
+      tag_ids: [tagId],
+    })
+    detailQuestion.value.tags = detailQuestion.value.tags?.filter(t => t.id !== tagId) || []
+    loadQuestions()
+  } catch (e) {
+    ElMessage.error('移除标签失败')
+  }
+}
+
+const aiTagSingle = async () => {
+  if (!detailQuestion.value) return
+  aiTagging.value = true
+  try {
+    const res = await axios.post('/api/questions/batch-ai-tag', {
+      question_ids: [detailQuestion.value.id],
+    })
+    if (res.data.tagged > 0) {
+      ElMessage.success('AI 打标完成')
+      // Reload question to get updated tags
+      const qRes = await axios.get(`/api/questions/${detailQuestion.value.id}`)
+      detailQuestion.value.tags = qRes.data.tags || []
+      loadQuestions()
+    } else {
+      ElMessage.info('AI 未找到合适标签')
+    }
+  } catch (e) {
+    ElMessage.error('AI 打标失败')
+  } finally {
+    aiTagging.value = false
+  }
+}
+
+const batchAITag = async () => {
+  if (selectedIds.size === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `将对 ${selectedIds.size} 道题执行 AI 自动打标，每道题会调用一次 AI。继续？`,
+      'AI 批量打标', { type: 'info' }
+    )
+  } catch { return }
+  try {
+    const res = await axios.post('/api/questions/batch-ai-tag', {
+      question_ids: [...selectedIds],
+    })
+    ElMessage.success(`AI 打标完成：${res.data.tagged} 道题`)
+    loadQuestions()
+  } catch (e) {
+    ElMessage.error('AI 批量打标失败')
+  }
+}
+
+// Tag CRUD
+const editTagItem = (tag) => {
+  editingTagItem.value = tag
+  tagForm.name = tag.name
+  tagForm.category = tag.category
+  tagForm.color = tag.color
+  showCreateTag.value = true
+}
+
+const saveTagItem = async () => {
+  try {
+    if (editingTagItem.value) {
+      await axios.put(`/api/tags/${editingTagItem.value.id}`, { ...tagForm })
+      ElMessage.success('标签已更新')
+    } else {
+      await axios.post('/api/tags', { name: tagForm.name, category: mgmtCategory.value, color: tagForm.color })
+      ElMessage.success('标签已创建')
+    }
+    showCreateTag.value = false
+    editingTagItem.value = null
+    tagForm.name = ''
+    tagForm.color = null
+    loadTags()
+  } catch (e) {
+    ElMessage.error('保存失败')
+  }
+}
+
+const deleteTagItem = async (tag) => {
+  try {
+    await ElMessageBox.confirm(`确定删除标签“${tag.name}”？`, '警告', { type: 'warning' })
+    await axios.delete(`/api/tags/${tag.id}`)
+    ElMessage.success('已删除')
+    loadTags()
+    loadQuestions()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('删除失败')
+  }
+}
+
 onMounted(() => {
   loadSources()
   loadTags()
@@ -792,5 +1004,26 @@ onMounted(() => {
 }
 .option-rendered :deep(.katex) {
   font-size: 1.0em;
+}
+
+/* Tag management */
+.mgmt-tag {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  font-size: 13px;
+  min-width: 120px;
+}
+.mgmt-tag-actions {
+  opacity: 0;
+  transition: opacity 0.2s;
+  margin-left: 8px;
+}
+.mgmt-tag:hover .mgmt-tag-actions {
+  opacity: 1;
 }
 </style>
