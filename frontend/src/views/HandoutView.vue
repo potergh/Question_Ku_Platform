@@ -57,9 +57,18 @@
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
-                <el-button type="primary" size="small" @click="exportPdf" :loading="exporting" :disabled="!currentHandout.items?.length">
-                  <el-icon><Download /></el-icon> 导出 PDF
-                </el-button>
+                <el-dropdown @command="exportFile" :disabled="!currentHandout.items?.length">
+                  <el-button type="primary" size="small" :loading="exporting">
+                    <el-icon><Download /></el-icon> 导出 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="pdf">导出 PDF</el-dropdown-item>
+                      <el-dropdown-item command="docx_teacher">导出 Word (教师版)</el-dropdown-item>
+                      <el-dropdown-item command="docx_student">导出 Word (学生版)</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
                 <el-button size="small" @click="showAIDrawer = true" type="success">
                   <el-icon><MagicStick /></el-icon> AI 助手
                 </el-button>
@@ -438,16 +447,37 @@ const onReorder = async () => {
   try { await axios.post(`/api/handouts/${currentHandout.value.id}/reorder`, { item_ids: ids }) } catch (e) {}
 }
 
-const exportPdf = async () => {
+const exportFile = async (command) => {
   exporting.value = true
   try {
-    const res = await axios.post(`/api/handouts/${currentHandout.value.id}/export`, null, { responseType: 'blob' })
-    const url = window.URL.createObjectURL(new Blob([res.data]))
-    const a = document.createElement('a'); a.href = url; a.download = `${currentHandout.value.title}.pdf`
-    document.body.appendChild(a); a.click(); a.remove(); window.URL.revokeObjectURL(url)
+    let url = `/api/handouts/${currentHandout.value.id}/export?format=${command === 'pdf' ? 'pdf' : 'docx'}`
+    if (command === 'docx_student') url += '&version=student'
+    else if (command === 'docx_teacher') url += '&version=teacher'
+    
+    const res = await axios.post(url, null, { responseType: 'blob' })
+    const blob = new Blob([res.data])
+    const downloadUrl = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = downloadUrl
+    
+    // Determine filename
+    let ext = command === 'pdf' ? 'pdf' : 'docx'
+    let suffix = command === 'docx_student' ? '_学生版' : command === 'docx_teacher' ? '_教师版' : ''
+    a.download = `${currentHandout.value.title}${suffix}.${ext}`
+    
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.URL.revokeObjectURL(downloadUrl)
+    
     currentHandout.value.status = 'exported'
-    ElMessage.success('PDF 已导出')
-  } catch (e) { ElMessage.error('导出失败') } finally { exporting.value = false }
+    const formatText = command === 'pdf' ? 'PDF' : command === 'docx_teacher' ? 'Word (教师版)' : 'Word (学生版)'
+    ElMessage.success(`${formatText} 已导出`)
+  } catch (e) { 
+    ElMessage.error('导出失败') 
+  } finally { 
+    exporting.value = false 
+  }
 }
 
 // ── AI Actions ──

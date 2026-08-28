@@ -1,0 +1,219 @@
+"""Word export service — python-docx generation for student/teacher versions."""
+
+import re
+import logging
+from pathlib import Path
+from io import BytesIO
+
+from docx import Document
+from docx.shared import Pt, Inches, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+
+logger = logging.getLogger(__name__)
+
+
+def generate_word(handout, version: str = "teacher") -> BytesIO:
+    """
+    Generate a Word document from a handout.
+    
+    Args:
+        handout: Handout ORM object with items loaded
+        version: "student" (no answers) or "teacher" (with answers)
+    
+    Returns:
+        BytesIO buffer containing the .docx file
+    """
+    doc = Document()
+    
+    # Set default font
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = '微软雅黑'
+    font.size = Pt(11)
+    
+    # Title
+    title = doc.add_heading(handout.title, level=1)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Subtitle
+    if handout.subject:
+        subtitle = doc.add_paragraph(handout.subject)
+        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        subtitle.runs[0].font.size = Pt(10)
+        subtitle.runs[0].font.color.rgb = RGBColor(128, 128, 128)
+    
+    doc.add_paragraph()  # Spacing
+    
+    # Sort items by order
+    items = sorted(handout.items, key=lambda i: i.order)
+    
+    question_num = 1
+    for item in items:
+        if item.item_type == "section_title":
+            _add_section_title(doc, item.custom_content or "")
+        
+        elif item.item_type in ("question", "example", "exercise"):
+            if item.question_snapshot:
+                _add_question(doc, item, question_num, version)
+                question_num += 1
+        
+        elif item.item_type == "knowledge_note":
+            _add_knowledge_note(doc, item.custom_content or "")
+    
+    # Save to buffer
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+def _add_section_title(doc: Document, title: str):
+    """Add a section title with styling."""
+    heading = doc.add_heading(title, level=2)
+    # Add bottom border
+    pPr = heading._p.get_or_add_pPr()
+    pBdr = pPr.makeelement(qn('w:pBdr'), {})
+    bottom = pBdr.makeelement(qn('w:bottom'), {
+        qn('w:val'): 'single',
+        qn('w:sz'): '8',
+        qn('w:space'): '1',
+        qn('w:color'): '409EFF',
+    })
+    pBdr.append(bottom)
+    pPr.append(pBdr)
+
+
+def _add_question(doc: Document, item, num: int, version: str):
+    """Add a question with optional answer/explanation."""
+    snap = item.question_snapshot or {}
+    
+    # Question header
+    header_text = f"{num}. "
+    if item.item_type == "example":
+        header_text = f"【例题】{num}. "
+    elif item.item_type == "exercise":
+        header_text = f"【练习】{num}. "
+    
+    # Add question number
+    p = doc.add_paragraph()
+    run = p.add_run(header_text)
+    run.bold = True
+    run.font.size = Pt(11)
+    
+    # Add score if present
+    score = snap.get("score")
+    if score:
+        score_run = p.add_run(f" ({score}分)")
+        score_run.font.size = Pt(9)
+        score_run.font.color.rgb = RGBColor(128, 128, 128)
+    
+    # Question content
+    content = snap.get("content", "") or ""
+    content = _latex_to_text(content)
+    if content:
+        doc.add_paragraph(content)
+    
+    # Options
+    options = snap.get("options") or []
+    if options:
+        for opt in options:
+            label = opt.get("label", "")
+            opt_content = opt.get("content", "")
+            opt_content = _latex_to_text(opt_content)
+            doc.add_paragraph(f"{label}. {opt_content}", style='List Bullet')
+    
+    # Answer section (teacher version only)
+    if version == "teacher":
+        answer = snap.get("answer", "") or ""
+        explanation = snap.get("explanation", "") or ""
+        
+        if answer or explanation:
+            # Add separator
+            doc.add_paragraph()
+            
+            if answer:
+                answer = _latex_to_text(answer)
+                p = doc.add_paragraph()
+                run = p.add_run("【答案】")
+                run.bold = True
+                run.font.color.rgb = RGBColor(0, 128, 0)
+                p.add_run(f" {answer}")
+            
+            if explanation:
+                explanation = _latex_to_text(explanation)
+                p = doc.add_paragraph()
+                run = p.add_run("【解析】")
+                run.bold = True
+                run.font.color.rgb = RGBColor(100, 100, 100)
+                p.add_run(f" {explanation}")
+    else:
+        # Student version: add blank space for answer
+        doc.add_paragraph("_" * 40)
+    
+    # Spacing
+    doc.add_paragraph()
+
+
+def _add_knowledge_note(doc: Document, content: str):
+    """Add a knowledge note with styling."""
+    content = _latex_to_text(content)
+    
+    # Add note with left border effect (using indentation)
+    p = doc.add_paragraph()
+    p.paragraph_format.left_indent = Inches(0.3)
+    
+    # Add marker
+    run = p.add_run("📝 ")
+    run.font.size = Pt(12)
+    
+    # Add content
+    run = p.add_run(content)
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(80, 80, 80)
+    run.italic = True
+    
+    doc.add_paragraph()
+
+
+def _latex_to_text(text: str) -> str:
+    """
+    Convert LaTeX to plain text for Word.
+    Simple conversion: $...$ → content, \frac{a}{b} → a/b, etc.
+    Complex formulas remain as text representation.
+    """
+    if not text:
+        return ""
+    
+    # Remove display math delimiters
+    text = re.sub(r'\$\$(.+?)\$\$', r'[\1]', text, flags=re.DOTALL)
+    # Remove inline math delimiters
+    text = re.sub(r'\$(.+?)\$', r'\1', text)
+    
+    # Simple LaTeX conversions
+    text = text.replace(r'\frac', '')
+    text = re.sub(r'\\{([^}]+)\\}{([^}]+)', r'\1/\2', text)  # \frac{a}{b} → a/b
+    text = text.replace(r'\times', '×')
+    text = text.replace(r'\div', '÷')
+    text = text.replace(r'\pm', '±')
+    text = text.replace(r'\leq', '≤')
+    text = text.replace(r'\geq', '≥')
+    text = text.replace(r'\neq', '≠')
+    text = text.replace(r'\approx', '≈')
+    text = text.replace(r'\infty', '∞')
+    text = text.replace(r'\sqrt', '√')
+    text = text.replace(r'\pi', 'π')
+    text = text.replace(r'\theta', 'θ')
+    text = text.replace(r'\alpha', 'α')
+    text = text.replace(r'\beta', 'β')
+    text = text.replace(r'\gamma', 'γ')
+    text = text.replace(r'\Delta', 'Δ')
+    text = text.replace(r'\Sigma', 'Σ')
+    text = text.replace(r'\Omega', 'Ω')
+    
+    # Remove remaining backslash commands
+    text = re.sub(r'\\[a-zA-Z]+', '', text)
+    # Remove curly braces
+    text = text.replace('{', '').replace('}', '')
+    
+    return text.strip()

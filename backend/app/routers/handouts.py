@@ -195,10 +195,13 @@ async def toggle_answer(
 
 
 @router.post("/api/handouts/{handout_id}/export")
-async def export_handout_pdf(
-    handout_id: str, db: AsyncSession = Depends(get_db)
+async def export_handout(
+    handout_id: str,
+    format: str = Query(default="pdf", description="pdf | docx"),
+    version: str = Query(default="teacher", description="student | teacher"),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Export handout as PDF using Playwright + KaTeX."""
+    """Export handout as PDF or Word (student/teacher version)."""
     result = await db.execute(
         select(Handout).where(Handout.id == handout_id).options(selectinload(Handout.items))
     )
@@ -208,40 +211,64 @@ async def export_handout_pdf(
     if not handout.items:
         raise HTTPException(400, "Handout has no items")
 
-    # Generate HTML
-    html = _render_handout_html(handout)
-
-    # Use Playwright to render and export PDF
-    import asyncio
-    from playwright.async_api import async_playwright
-
-    output_path = settings.export_dir / f"{handout_id}.pdf"
     settings.export_dir.mkdir(parents=True, exist_ok=True)
 
-    async def _export():
-        async with async_playwright() as p:
-            browser = await p.chromium.launch()
-            page = await browser.new_page()
-            await page.set_content(html, wait_until="networkidle")
-            await page.pdf(
-                path=str(output_path),
-                format="A4",
-                print_background=True,
-                margin={"top": "20mm", "bottom": "20mm", "left": "15mm", "right": "15mm"},
-            )
-            await browser.close()
+    if format == "docx":
+        # Word export
+        from app.services.word_export import generate_word
+        
+        buffer = generate_word(handout, version=version)
+        version_suffix = "_student" if version == "student" else "_teacher"
+        filename = f"{handout.title}{version_suffix}.docx"
+        output_path = settings.export_dir / f"{handout_id}{version_suffix}.docx"
+        
+        # Save to file
+        with open(output_path, "wb") as f:
+            f.write(buffer.read())
+        
+        # Update handout status
+        handout.status = "exported"
+        await db.commit()
+        
+        return FileResponse(
+            str(output_path),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=filename,
+        )
+    else:
+        # PDF export (default)
+        html = _render_handout_html(handout)
 
-    await _export()
+        # Use Playwright to render and export PDF
+        import asyncio
+        from playwright.async_api import async_playwright
 
-    # Update handout status
-    handout.status = "exported"
-    await db.commit()
+        output_path = settings.export_dir / f"{handout_id}.pdf"
 
-    return FileResponse(
-        str(output_path),
-        media_type="application/pdf",
-        filename=f"{handout.title}.pdf",
-    )
+        async def _export():
+            async with async_playwright() as p:
+                browser = await p.chromium.launch()
+                page = await browser.new_page()
+                await page.set_content(html, wait_until="networkidle")
+                await page.pdf(
+                    path=str(output_path),
+                    format="A4",
+                    print_background=True,
+                    margin={"top": "20mm", "bottom": "20mm", "left": "15mm", "right": "15mm"},
+                )
+                await browser.close()
+
+        await _export()
+
+        # Update handout status
+        handout.status = "exported"
+        await db.commit()
+
+        return FileResponse(
+            str(output_path),
+            media_type="application/pdf",
+            filename=f"{handout.title}.pdf",
+        )
 
 
 def _render_handout_html(handout: Handout) -> str:
