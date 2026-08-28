@@ -8,6 +8,19 @@ from PIL import Image, ImageChops
 
 from .models import QuestionRecord
 
+# WebP 格式单边像素上限（16383），超过会导致编码失败。
+WEBP_MAX_SIDE = 16383
+
+
+def save_webp(image: Image.Image, path: Path, quality: int) -> Image.Image:
+    """保存为 WebP；超过格式上限时等比缩小后再编码，返回实际保存的图像。"""
+    if image.width > WEBP_MAX_SIDE or image.height > WEBP_MAX_SIDE:
+        scale = min(WEBP_MAX_SIDE / image.width, WEBP_MAX_SIDE / image.height)
+        new_size = (max(1, int(image.width * scale)), max(1, int(image.height * scale)))
+        image = image.resize(new_size, Image.LANCZOS)
+    image.save(path, "WEBP", quality=quality, method=6)
+    return image
+
 
 class QuestionCropper:
     """将一个题目的一个或多个页面片段渲染、收边并纵向拼接。"""
@@ -76,8 +89,8 @@ class QuestionCropper:
 
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / record.filename
-        framed.save(output_path, "WEBP", quality=self.webp_quality, method=6)
-        record.width_px, record.height_px = framed.size
+        saved = save_webp(framed, output_path, self.webp_quality)
+        record.width_px, record.height_px = saved.size
         if record.height_px > 9000:
             record.warnings.append("图片高度超过 9000px，建议人工检查跨页边界。")
         return output_path

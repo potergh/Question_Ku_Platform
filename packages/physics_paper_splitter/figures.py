@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pymupdf as fitz
 
-from .cropper import QuestionCropper
+from .cropper import QuestionCropper, save_webp
 from .models import QuestionRecord
 
 # 宽或高小于该值（PDF 点）的图片视为装饰元素（项目符号、边框），不单独提取。
@@ -69,6 +69,6 @@ class FigureExtractor:
                     counter += 1
                     image = self._cropper._render_segment(page, rect)
                     name = f"Q{record.number:03d}_{counter:02d}.webp"
-                    image.save(figures_dir / name, "WEBP", quality=self._cropper.webp_quality, method=6)
+                    save_webp(image, figures_dir / name, self._cropper.webp_quality)
                     paths.append(f"figures/{name}")
         return paths
