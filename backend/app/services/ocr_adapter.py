@@ -94,12 +94,20 @@ class OCRAdapter:
         q_type = ocr_question.get("type")
 
         # Build Markdown canonical content from OCR output
-        # The OCR pipeline provides structured fields; we merge them into Markdown
+        # For multiple-choice: use stem (options separated) as content
         content = self._build_markdown_content(ocr_question, document_dir)
-        raw_content = content  # V1: raw = content (no separate raw pipeline)
 
-        # Options for multiple choice
-        options = ocr_question.get("options", [])
+        # Raw OCR content = original selected text (never modified)
+        text_data = ocr_question.get("text", {})
+        if isinstance(text_data, dict):
+            raw_content = text_data.get("selected", "") or text_data.get("native", "") or text_data.get("local_ocr", "")
+        elif isinstance(text_data, str):
+            raw_content = text_data
+        else:
+            raw_content = content
+
+        # Options: extract from content.options (dict) and convert to list
+        options = self._extract_options(ocr_question)
 
         # Answer and explanation
         answer_data = ocr_question.get("answer", {})
@@ -133,25 +141,52 @@ class OCRAdapter:
             needs_review=needs_review,
         )
 
+    def _extract_options(self, ocr_question: dict) -> list[dict]:
+        """Extract options from OCR output and convert to list format.
+
+        Handles both:
+        - content.options: {"A": "...", "B": "..."} (from parse_content)
+        - options: [{"label": "A", "content": "..."}] (already in list format)
+        """
+        # Try content.options first (from parse_content in structure.py)
+        content_data = ocr_question.get("content", {})
+        if isinstance(content_data, dict) and content_data.get("options"):
+            opts = content_data["options"]
+            if isinstance(opts, dict):
+                return [
+                    {"label": label, "content": value or ""}
+                    for label, value in sorted(opts.items())
+                ]
+            elif isinstance(opts, list):
+                return opts
+
+        # Fallback: top-level options
+        top_opts = ocr_question.get("options", [])
+        if isinstance(top_opts, list):
+            return top_opts
+
+        return []
+
     def _build_markdown_content(self, ocr_question: dict, document_dir: Path) -> str:
         """Build Markdown canonical content from OCR structured data.
 
+        For multiple-choice questions: use content.stem (options already separated).
+        For other questions: use text.selected (full OCR text).
         Images are inlined as ![figure](asset://path).
-        LaTeX formulas are wrapped in $...$.
         """
-        # The OCR pipeline provides content in different formats
-        # Try to use the best available text
-        text_data = ocr_question.get("text", {})
-        if isinstance(text_data, dict):
-            content = text_data.get("selected", "") or text_data.get("native", "") or text_data.get("local_ocr", "")
-        elif isinstance(text_data, str):
-            content = text_data
+        # Prefer content.stem (parsed stem with options separated)
+        content_data = ocr_question.get("content", {})
+        if isinstance(content_data, dict) and content_data.get("stem"):
+            content = content_data["stem"]
         else:
-            content = ""
-
-        # If there's a content field directly
-        if not content:
-            content = ocr_question.get("content", {}).get("stem", "") if isinstance(ocr_question.get("content"), dict) else ""
+            # Fallback to raw text
+            text_data = ocr_question.get("text", {})
+            if isinstance(text_data, dict):
+                content = text_data.get("selected", "") or text_data.get("native", "") or text_data.get("local_ocr", "")
+            elif isinstance(text_data, str):
+                content = text_data
+            else:
+                content = ""
 
         # Inline figures into content at appropriate positions
         # V1: append figures at the end (OCR doesn't provide position info)
