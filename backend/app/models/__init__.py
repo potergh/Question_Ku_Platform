@@ -5,6 +5,7 @@ from app.models.question import Question
 from app.models.tag import Tag, question_tags
 from app.models.settings import Settings
 from app.models.job import Job
+from app.models.basket import SelectionBasket, SelectionBasketItem
 
 __all__ = [
     "Source",
@@ -13,4 +14,6 @@ __all__ = [
     "question_tags",
     "Settings",
     "Job",
+    "SelectionBasket",
+    "SelectionBasketItem",
 ]

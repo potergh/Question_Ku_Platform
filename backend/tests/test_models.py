@@ -3,10 +3,11 @@
 import pytest
 from datetime import datetime
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database import Base
-from app.models import Source, Question, Tag, Settings, Job
+from app.models import Source, Question, Tag, Settings, Job, SelectionBasket, SelectionBasketItem
 
 
 # Use a separate in-memory DB for tests
@@ -183,4 +184,22 @@ async def test_job_lifecycle(db: AsyncSession):
     await db.commit()
     await db.refresh(job)
     assert job.status == "running"
+
+
+# ── SelectionBasket ────────────────────────────────────
+
+async def test_basket_item_unique(db: AsyncSession):
+    basket = SelectionBasket()
+    db.add(basket)
+    await db.commit()
+
+    item = SelectionBasketItem(basket_id=basket.id, question_id="q-1", position=0)
+    db.add(item)
+    await db.commit()
+    assert item.id is not None
+
+    dup = SelectionBasketItem(basket_id=basket.id, question_id="q-1", position=1)
+    db.add(dup)
+    with pytest.raises(Exception):
+        await db.commit()
 
