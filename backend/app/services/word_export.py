@@ -180,6 +180,7 @@ def _add_content_with_images(doc: Document, content: str, ocr_dir: str = ""):
     """Add content to document, splitting text and images.
     
     Handles asset:// URLs by resolving them to local file paths.
+    Converts webp to png for python-docx compatibility.
     """
     if not content:
         return
@@ -196,10 +197,21 @@ def _add_content_with_images(doc: Document, content: str, ocr_dir: str = ""):
             image_path = _resolve_image_path(url, ocr_dir)
             if image_path and Path(image_path).exists():
                 try:
+                    # python-docx doesn't support webp — convert to png
+                    display_path = image_path
+                    if image_path.lower().endswith('.webp'):
+                        from PIL import Image
+                        import io
+                        img = Image.open(image_path)
+                        buf = io.BytesIO()
+                        img.save(buf, format='PNG')
+                        buf.seek(0)
+                        display_path = buf
+                    
                     p = doc.add_paragraph()
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     run = p.add_run()
-                    run.add_picture(image_path, width=Inches(4.5))
+                    run.add_picture(display_path, width=Inches(4.5))
                 except Exception as e:
                     logger.warning(f"Failed to add image {image_path}: {e}")
                     doc.add_paragraph(f"[图片加载失败]")

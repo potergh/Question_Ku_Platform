@@ -286,21 +286,32 @@ async def export_handout(
 
         # Use Playwright to render and export PDF
         import asyncio
+        import tempfile
+        from pathlib import Path as _Path
         from playwright.async_api import async_playwright
 
         output_path = settings.export_dir / f"{handout_id}.pdf"
 
         async def _export():
             async with async_playwright() as p:
-                browser = await p.chromium.launch()
+                browser = await p.chromium.launch(args=["--allow-file-access-from-files"])
                 page = await browser.new_page()
-                await page.set_content(html, wait_until="networkidle")
-                await page.pdf(
-                    path=str(output_path),
-                    format="A4",
-                    print_background=True,
-                    margin={"top": "20mm", "bottom": "20mm", "left": "15mm", "right": "15mm"},
-                )
+                # Write HTML to temp file so file:// image URLs resolve correctly
+                # (set_content uses about:blank as base, blocking file:// images)
+                tmp = tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8")
+                tmp.write(html)
+                tmp.close()
+                try:
+                    file_url = _Path(tmp.name).as_uri()
+                    await page.goto(file_url, wait_until="networkidle", timeout=30000)
+                    await page.pdf(
+                        path=str(output_path),
+                        format="A4",
+                        print_background=True,
+                        margin={"top": "20mm", "bottom": "20mm", "left": "15mm", "right": "15mm"},
+                    )
+                finally:
+                    _Path(tmp.name).unlink(missing_ok=True)
                 await browser.close()
 
         await _export()
