@@ -106,8 +106,8 @@
         <div class="q-card-body" @click.stop="openDetail(q)">
           <div class="q-content-preview" v-html="renderPreview(q.content, 150)"></div>
           <div class="q-options-preview" v-if="q.options?.length">
-            <div v-for="opt in q.options.slice(0, 4)" :key="opt.label" class="opt-line">
-              {{ opt.label }}. {{ truncate(opt.content, 40) }}
+            <div v-for="opt in q.options.slice(0, 4)" :key="opt.label" class="opt-line"
+              v-html="opt.label + '. ' + renderOptionContent(opt.content)">
             </div>
           </div>
         </div>
@@ -166,11 +166,20 @@
 
         <div v-if="detailQuestion.options?.length" style="margin-top: 12px;">
           <h4>选项</h4>
-          <div v-for="(opt, i) in detailQuestion.options" :key="i" style="margin-bottom: 6px;">
-            <el-input v-model="opt.content" size="small">
-              <template #prepend>{{ opt.label }}</template>
-            </el-input>
-          </div>
+          <!-- Preview mode: rendered LaTeX + images -->
+          <template v-if="detailPreviewMode">
+            <div v-for="(opt, i) in detailQuestion.options" :key="i" class="option-rendered"
+              v-html="opt.label + '. ' + renderOptionContent(opt.content)">
+            </div>
+          </template>
+          <!-- Edit mode: input fields -->
+          <template v-else>
+            <div v-for="(opt, i) in detailQuestion.options" :key="i" style="margin-bottom: 6px;">
+              <el-input v-model="opt.content" size="small">
+                <template #prepend>{{ opt.label }}</template>
+              </el-input>
+            </div>
+          </template>
         </div>
 
         <el-row :gutter="12" style="margin-top: 12px;">
@@ -295,7 +304,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
-import { renderFullContent, renderPreview } from '../utils/render.js'
+import { renderFullContent, renderPreview, renderOptionContent } from '../utils/render.js'
 
 const questions = ref([])
 const sources = ref([])
@@ -667,7 +676,9 @@ onMounted(() => {
   overflow: hidden;
 }
 .q-options-preview { margin-top: 6px; }
-.opt-line { font-size: 12px; color: #909399; }
+.opt-line { font-size: 12px; color: #909399; line-height: 1.5; }
+.opt-line :deep(img) { max-height: 24px; vertical-align: middle; margin: 0 2px; border-radius: 2px; }
+.opt-line :deep(.katex) { font-size: 0.95em; }
 
 .q-card-footer {
   display: flex;
@@ -759,5 +770,26 @@ onMounted(() => {
   font-size: 13px;
   padding: 2px 0;
   color: #606266;
+}
+
+/* Rendered options in detail drawer */
+.option-rendered {
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  background: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #303133;
+}
+.option-rendered :deep(img) {
+  max-height: 40px;
+  vertical-align: middle;
+  margin: 0 4px;
+  border-radius: 3px;
+}
+.option-rendered :deep(.katex) {
+  font-size: 1.0em;
 }
 </style>

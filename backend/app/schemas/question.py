@@ -51,6 +51,11 @@ class QuestionResponse(BaseModel):
                 self.content = resolve_asset_urls(self.content, self.source_id)
             if self.card_image_path and ('\\' in (self.card_image_path or '') or self.card_image_path.startswith('/')):
                 self.card_image_path = resolve_card_image_path(self.card_image_path, self.source_id)
+            # Also resolve asset:// URLs in options
+            if self.options and isinstance(self.options, list):
+                for opt in self.options:
+                    if isinstance(opt, dict) and opt.get('content') and 'asset://' in str(opt['content']):
+                        opt['content'] = resolve_asset_urls(opt['content'], self.source_id)
         # Map question type to Chinese
         if self.question_type:
             self.question_type_zh = QUESTION_TYPE_MAP.get(self.question_type, self.question_type)

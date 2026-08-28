@@ -134,3 +134,38 @@ export function renderPreview(text, maxLen = 150) {
   // Combine
   return cleanText + (images.length ? '<div style="margin-top:4px;">' + images.join('') + '</div>' : '')
 }
+
+/**
+ * Render option content — LaTeX + inline images.
+ * Used for displaying options in card preview and detail drawer.
+ */
+export function renderOptionContent(text) {
+  if (!text) return ''
+
+  // 1. LaTeX (same as processLatex in renderFullContent)
+  let html = text
+
+  // Block math: $$...$$
+  html = html.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => {
+    return renderLatex(tex.trim(), true)
+  })
+  // Block math: \[...\]
+  html = html.replace(/\\\[([\s\S]+?)\\\]/g, (_, tex) => {
+    return renderLatex(tex.trim(), true)
+  })
+  // Inline math: $...$
+  html = html.replace(/(?<!\\)\$(?!\$)([^\$\n]+?)\$/g, (_, tex) => {
+    return renderLatex(tex.trim(), false)
+  })
+  // Inline math: \(...\)
+  html = html.replace(/\\\(([\s\S]+?)\\\)/g, (_, tex) => {
+    return renderLatex(tex.trim(), false)
+  })
+
+  // 2. Images as small inline thumbnails
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+    return `<img src="${url}" alt="${alt}" style="max-height:40px;vertical-align:middle;margin:0 4px;border-radius:3px;" loading="lazy" />`
+  })
+
+  return html
+}
