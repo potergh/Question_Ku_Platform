@@ -2,6 +2,7 @@
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +14,9 @@ from app.routers import upload, questions, handouts, tags, settings as settings_
 
 
 logging.basicConfig(level=logging.INFO)
+
+# Frontend dist directory (for production serving)
+FRONTEND_DIST = settings.base_dir / "frontend" / "dist"
 
 
 @asynccontextmanager
@@ -50,3 +54,9 @@ app.include_router(settings_router.router)
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok"}
+
+
+# Serve frontend static files (production mode)
+# This must be AFTER all API routes
+if FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
