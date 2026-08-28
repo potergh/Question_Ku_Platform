@@ -316,9 +316,15 @@
     </el-dialog>
 
     <!-- Batch Tag Dialog -->
-    <el-dialog v-model="showTagDialog" title="批量打标签" width="400px">
+    <el-dialog v-model="showTagDialog" title="批量打标签" width="450px">
+      <el-select v-model="batchTagSubject" placeholder="按学科筛选" clearable @change="() => {}" style="width: 100%; margin-bottom: 8px;">
+        <el-option label="物理" value="physics" />
+        <el-option label="数学" value="math" />
+        <el-option label="化学" value="chemistry" />
+        <el-option label="英语" value="english" />
+      </el-select>
       <el-select v-model="selectedTagIds" multiple placeholder="选择标签" filterable style="width: 100%;">
-        <el-option v-for="t in allTags" :key="t.id" :label="`${subjectText(t.subject)} / ${categoryText(t.category)} / ${t.name}`" :value="t.id" />
+        <el-option v-for="t in batchFilteredTags" :key="t.id" :label="`${subjectText(t.subject)} / ${categoryText(t.category)} / ${t.name}`" :value="t.id" />
       </el-select>
       <template #footer>
         <el-button @click="showTagDialog = false">取消</el-button>
@@ -413,6 +419,7 @@ const detailPreviewMode = ref(true) // true = preview, false = edit
 const aiAccepted = ref(false)
 const showTagDialog = ref(false)
 const selectedTagIds = ref([])
+const batchTagSubject = ref('')
 
 // Tag management state
 const showTagMgmt = ref(false)
@@ -711,10 +718,16 @@ const subjectText = (s) => ({ physics: '物理', math: '数学', chemistry: '化
 
 const filteredMgmtTags = computed(() => allTags.value.filter(t => t.subject === mgmtSubject.value && t.category === mgmtCategory.value))
 
+const batchFilteredTags = computed(() => {
+  if (!batchTagSubject.value) return allTags.value
+  return allTags.value.filter(t => t.subject === batchTagSubject.value)
+})
+
 const availableTagsForDetail = computed(() => {
   if (!detailQuestion.value) return allTags.value
   const currentIds = new Set(detailQuestion.value.tags?.map(t => t.id) || [])
-  return allTags.value.filter(t => !currentIds.has(t.id))
+  const subject = detailQuestion.value.subject
+  return allTags.value.filter(t => !currentIds.has(t.id) && (!subject || !t.subject || t.subject === subject))
 })
 
 const addTagToDetail = async () => {
