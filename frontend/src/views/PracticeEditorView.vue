@@ -120,8 +120,9 @@
         </div>
       </div>
 
-      <!-- 右：A4 预览（后端渲染，与 PDF 同源） -->
-      <div class="preview-panel">
+      <!-- 右：A4 预览（后端渲染，与 PDF 同源），分隔条可拖拽调宽 -->
+      <div class="pv-resizer" @mousedown="startPvResize"></div>
+      <div class="preview-panel" :style="{ width: panelW + 'px' }">
         <div class="pv-toolbar">
           <el-button size="small" text :disabled="preview.page <= 1" @click="preview.page--">‹</el-button>
           <span class="pv-pos">{{ preview.page }} / {{ preview.pages || '-' }}</span>
@@ -461,6 +462,27 @@ const showFullscreen = ref(false)
 const preview = reactive({ pages: 0, page: 1, sha: '', zoom: 1, busy: false })   // zoom 相对铺满宽：1=100%
 let previewTimer = null
 
+// 预览面板宽度：分隔条可拖拽调整（向左拖变宽），记住上次宽度
+const panelW = ref(Math.min(Math.max(Number(localStorage.getItem('pvPanelW')) || 380, 280), 1200))
+const startPvResize = (e) => {
+  e.preventDefault()
+  const startX = e.clientX
+  const startW = panelW.value
+  const maxW = Math.floor(window.innerWidth * 0.75)
+  const onMove = (ev) => {
+    panelW.value = Math.min(Math.max(startW + (startX - ev.clientX), 280), maxW)
+  }
+  const onUp = () => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+    document.body.style.userSelect = ''
+    localStorage.setItem('pvPanelW', String(panelW.value))
+  }
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
 // 预览图宽 = 面板内宽 × 缩放（100% 即铺满面板，不再按绝对 794px 溢出）
 const pvPanel = ref(null)
 const pvWidth = ref(340)
@@ -535,7 +557,9 @@ onMounted(async () => {
 .q-ops { display: none; }
 .tree-question:hover .q-ops { display: inline-flex; }
 .edit-panel { flex: 1; overflow-y: auto; padding: 16px; background: #fafafa; }
-.preview-panel { width: 380px; border-left: 1px solid #ebeef5; display: flex; flex-direction: column; background: #f0f2f5; }
+.pv-resizer { width: 5px; cursor: col-resize; background: #ebeef5; flex-shrink: 0; transition: background .15s; }
+.pv-resizer:hover { background: #c0c4cc; }
+.preview-panel { flex-shrink: 0; border-left: 1px solid #ebeef5; display: flex; flex-direction: column; background: #f0f2f5; }
 .pv-toolbar { display: flex; align-items: center; gap: 2px; padding: 6px 8px; border-bottom: 1px solid #ebeef5; background: #fff; }
 .pv-pos { font-size: 12px; color: #606266; white-space: nowrap; }
 .pv-scroll { flex: 1; overflow: auto; padding: 10px; display: flex; justify-content: center; }
