@@ -11,6 +11,8 @@
         <el-button @click="openSettings"><el-icon><Setting /></el-icon> 练习设置</el-button>
         <el-button @click="previewRegroup"><el-icon><Sort /></el-icon> 整理结构</el-button>
         <el-button @click="unifyLayout"><el-icon><MagicStick /></el-icon> 统一排版</el-button>
+        <el-button @click="exportFile('pdf')"><el-icon><Document /></el-icon> 导出 PDF</el-button>
+        <el-button @click="exportFile('docx')"><el-icon><Tickets /></el-icon> 导出 Word</el-button>
       </div>
     </div>
 
@@ -118,9 +120,23 @@
         </div>
       </div>
 
-      <!-- 右：预览占位（阶段三接入） -->
+      <!-- 右：A4 预览（后端渲染，与 PDF 同源） -->
       <div class="preview-panel">
-        <el-empty description="A4 预览将在阶段三接入" :image-size="80" />
+        <div class="pv-toolbar">
+          <el-button size="small" text :disabled="preview.page <= 1" @click="preview.page--">‹</el-button>
+          <span class="pv-pos">{{ preview.page }} / {{ preview.pages || '-' }}</span>
+          <el-button size="small" text :disabled="preview.page >= preview.pages" @click="preview.page++">›</el-button>
+          <el-select v-model="preview.zoom" size="small" style="width:76px">
+            <el-option v-for="z in [0.6, 0.8, 1, 1.5, 2]" :key="z" :label="Math.round(z * 100) + '%'" :value="z" />
+          </el-select>
+          <el-button size="small" text @click="showFullscreen = true" :disabled="!preview.pages">⛶</el-button>
+          <el-button size="small" text @click="refreshPreview" :loading="preview.busy">↻</el-button>
+        </div>
+        <div class="pv-scroll" v-if="preview.pages">
+          <img :src="pageImgUrl" :style="{ width: (220 * preview.zoom) + 'px' }" />
+        </div>
+        <el-empty v-else-if="preview.busy" description="正在渲染预览…" :image-size="60" />
+        <el-empty v-else description="编辑后自动刷新预览" :image-size="60" />
       </div>
     </div>
 
@@ -155,6 +171,16 @@
         <el-form-item label="副标题"><el-input v-model="settingsForm.subtitle" /></el-form-item>
         <el-form-item label="学生信息栏"><el-switch v-model="settingsForm.showInfoBar" />
           <span class="hint">导出时显示姓名/班级/日期栏</span></el-form-item>
+        <el-form-item label="页边距">
+          <el-select v-model="settingsForm.marginPreset" style="width:160px">
+            <el-option label="窄（15mm）" value="narrow" />
+            <el-option label="标准（25mm）" value="normal" />
+            <el-option label="宽（32mm）" value="wide" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="页码"><el-switch v-model="settingsForm.showPageNumber" /></el-form-item>
+        <el-form-item label="显示分值"><el-switch v-model="settingsForm.showScore" /></el-form-item>
+        <el-form-item label="显示总分"><el-switch v-model="settingsForm.showTotalScore" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showSettings = false">取消</el-button>
@@ -172,11 +198,23 @@
         </div>
       </div>
     </el-dialog>
+
+    <!-- 全屏预览 -->
+    <el-dialog v-model="showFullscreen" title="全屏预览" width="900px" top="4vh">
+      <div class="fs-preview" v-if="preview.pages">
+        <img :src="pageImgUrl" :style="{ width: (794 * preview.zoom) + 'px' }" />
+      </div>
+      <template #footer>
+        <el-button :disabled="preview.page <= 1" @click="preview.page--">上一页</el-button>
+        <span>{{ preview.page }} / {{ preview.pages }}</span>
+        <el-button :disabled="preview.page >= preview.pages" @click="preview.page++">下一页</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -195,11 +233,13 @@ const showMove = ref(false)
 const moveTarget = ref('')
 const moveQuestionTarget = ref(null)
 const showSettings = ref(false)
-const settingsForm = reactive({ title: '', subtitle: '', showInfoBar: true })
+const settingsForm = reactive({ title: '', subtitle: '', showInfoBar: true,
+  marginPreset: 'normal', showPageNumber: true, showScore: false, showTotalScore: false })
 
 const load = async () => {
   const res = await axios.get(`/api/practices/${practiceId}/detail`)
   practice.value = res.data
+  schedulePreview()
 }
 
 const selectQuestion = (s, q) => { selected.value = q; selectedSection.value = s; normalizeBlocks() }
@@ -283,13 +323,22 @@ const openSettings = () => {
   settingsForm.title = practice.value.title
   settingsForm.subtitle = practice.value.subtitle || ''
   settingsForm.showInfoBar = practice.value.page_config?.show_info_bar ?? true
+  settingsForm.marginPreset = practice.value.page_config?.margin_preset || 'normal'
+  settingsForm.showPageNumber = practice.value.page_config?.show_page_number ?? true
+  settingsForm.showScore = practice.value.page_config?.show_score ?? false
+  settingsForm.showTotalScore = practice.value.page_config?.show_total_score ?? false
   showSettings.value = true
 }
 const saveSettings = async () => {
   await axios.put(`/api/practices/${practiceId}`, {
     title: settingsForm.title,
     subtitle: settingsForm.subtitle || null,
-    page_config: { ...(practice.value.page_config || {}), show_info_bar: settingsForm.showInfoBar },
+    page_config: { ...(practice.value.page_config || {}),
+      show_info_bar: settingsForm.showInfoBar,
+      margin_preset: settingsForm.marginPreset,
+      show_page_number: settingsForm.showPageNumber,
+      show_score: settingsForm.showScore,
+      show_total_score: settingsForm.showTotalScore },
   })
   showSettings.value = false
   ElMessage.success('已保存')
@@ -407,6 +456,43 @@ const updateMeta = async () => {
   await load()
 }
 
+/* ---- 预览与导出（阶段三） ---- */
+const showFullscreen = ref(false)
+const preview = reactive({ pages: 0, page: 1, sha: '', zoom: 1, busy: false })
+let previewTimer = null
+
+const pageImgUrl = computed(() => preview.pages
+  ? `/api/practices/${practiceId}/preview/page/${preview.page}?scale=2&t=${preview.sha}`
+  : '')
+
+const refreshPreview = async () => {
+  preview.busy = true
+  try {
+    const res = await axios.post(`/api/practices/${practiceId}/render`)
+    preview.pages = res.data.pages
+    preview.sha = res.data.sha
+    if (preview.page > preview.pages) preview.page = 1
+  } catch { /* 渲染失败不阻断编辑 */ } finally { preview.busy = false }
+}
+const schedulePreview = () => {   // 编辑后防抖刷新（规格 10.1）
+  clearTimeout(previewTimer)
+  previewTimer = setTimeout(refreshPreview, 800)
+}
+
+const exportFile = async (fmt) => {
+  try {
+    const res = await axios.get(`/api/practices/${practiceId}/export/${fmt}`, { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${practice.value.title || '练习'}.${fmt}`
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('导出成功')
+    await load()
+  } catch { ElMessage.error('导出失败') }
+}
+
 onMounted(async () => {
   if (!practiceId) { router.push('/practices'); return }
   await load()
@@ -433,7 +519,13 @@ onMounted(async () => {
 .q-ops { display: none; }
 .tree-question:hover .q-ops { display: inline-flex; }
 .edit-panel { flex: 1; overflow-y: auto; padding: 16px; background: #fafafa; }
-.preview-panel { width: 260px; border-left: 1px solid #ebeef5; display: flex; align-items: center; justify-content: center; color: #c0c4cc; }
+.preview-panel { width: 280px; border-left: 1px solid #ebeef5; display: flex; flex-direction: column; background: #f0f2f5; }
+.pv-toolbar { display: flex; align-items: center; gap: 2px; padding: 6px 8px; border-bottom: 1px solid #ebeef5; background: #fff; }
+.pv-pos { font-size: 12px; color: #606266; white-space: nowrap; }
+.pv-scroll { flex: 1; overflow: auto; padding: 10px; display: flex; justify-content: center; }
+.pv-scroll img { box-shadow: 0 1px 6px rgba(0,0,0,.18); background: #fff; }
+.fs-preview { display: flex; justify-content: center; overflow: auto; max-height: 76vh; }
+.fs-preview img { box-shadow: 0 1px 8px rgba(0,0,0,.22); background: #fff; }
 .hint { color: #909399; font-size: 12px; margin-left: 8px; }
 .question-editor { max-width: 760px; margin: 0 auto; }
 .qe-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
