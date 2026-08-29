@@ -1834,3 +1834,13 @@ git commit -m "feat: 阶段二收尾——启用编辑器入口（块式编辑�
 | 9 一键排版 | Task 4（两命令拆分，尊重用户定制） |
 | 决策 3/6 | 恢复永不写回题库；留白默认按题型、单题可覆盖 |
 
+## 实施偏差记录（2026-08-29 执行时修正）
+
+1. **`rebuild_content_from_blocks` 签名**：由计划的同步 `(db, pq)` 依赖 relationship 缓存，改为 **async 直接查库**（`select ... where practice_question_id order by position`）。原因：SQLAlchemy identity map 中已加载的空 `blocks` 集合不会被后续 selectinload 重新填充，必须不依赖缓存。
+2. **`materialize_blocks` 只 `flush` 不 `commit`**：函数内 `commit()` 会使 `pq.blocks` 关系过期，后续访问触发懒加载报 MissingGreenlet；提交由调用方负责。
+3. **`populate_existing`**：`_get_practice_full`、`_load_pq`、`_renumber`、`_get_section` 的查询都加了 `.execution_options(populate_existing=True)`，否则 selectinload 返回 identity map 中的过期集合。
+4. **`apply_regroup` 顺序**：先建新小节并用 `section.questions.append(q)` 迁移题目（新小节需先 `db.refresh(section, attribute_names=["questions"])` 初始化集合），再删旧小节；直接赋 `q.section_id` 或先删旧小节都会触发 delete-orphan 级联删题。
+5. **`_renumber` 保留空的 custom 小节**：只删空的题型小节。
+6. **Task 6 前端小修**：选项块 `label` 输入框补了 `@change="saveOptions(b)"`（计划中仅 content 有），否则只改标签不会保存。
+7. **测试数量**：实际累计 39 项（计划预估 ≥40），全部通过；冒烟时真实库响应字段为 `.questions` / `.practices`（非 `.items`）。
+

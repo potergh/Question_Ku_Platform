@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>练习列表</h2>
-        <p class="subtitle">从选题池创建练习，编辑器即将开放</p>
+        <p class="subtitle">从选题池创建练习，点击进入编辑器开始整理题目</p>
       </div>
       <el-button @click="$router.push('/basket')"><el-icon><ShoppingCart /></el-icon> 去选题池创建</el-button>
     </div>
@@ -54,9 +54,7 @@
         </div>
       </div>
       <template #footer>
-        <el-tooltip content="阶段二开放" placement="top">
-          <el-button type="primary" disabled>进入编辑器</el-button>
-        </el-tooltip>
+        <el-button type="primary" @click="$router.push('/practice/editor?id=' + detail.id)">进入编辑器</el-button>
         <el-button @click="showDetail = false">关闭</el-button>
       </template>
     </el-dialog>
