@@ -333,3 +333,155 @@ async def restore_question(practice_id: str, pq_id: str, db: AsyncSession = Depe
     if not restored:
         raise HTTPException(404, "题库原题不存在或已删除，无法恢复")
     return await _question_payload(db, restored)
+
+
+# ---------------- 结构编排（小节 + 题目增删移动 + 连续编号） ----------------
+
+class SectionCreateRequest(BaseModel):
+    title: str
+    position: int | None = None
+
+
+class SectionUpdateRequest(BaseModel):
+    title: str | None = None
+    show_title: bool | None = None
+    start_on_new_page: bool | None = None
+
+
+class SectionReorderRequest(BaseModel):
+    section_ids: list[str]
+
+
+class QuestionMoveRequest(BaseModel):
+    target_section_id: str
+    target_position: int | None = None
+
+
+class QuestionMetaUpdateRequest(BaseModel):
+    question_type: str | None = None
+    difficulty: int | None = None
+    score: float | None = None
+
+
+async def _renumber(db: AsyncSession, practice_id: str):
+    """按小节顺序全练习连续编号；删除已空的小节。"""
+    sections = (await db.execute(
+        select(PracticeSection)
+        .where(PracticeSection.practice_id == practice_id)
+        .options(selectinload(PracticeSection.questions))
+        .order_by(PracticeSection.position)
+        .execution_options(populate_existing=True)
+    )).scalars().all()
+    n = 0
+    kept = []
+    for s in sections:
+        if not s.questions:
+            await db.delete(s)
+            continue
+        for pos, q in enumerate(sorted(s.questions, key=lambda x: x.position)):
+            n += 1
+            q.position = pos
+            q.question_number = n
+        kept.append(s)
+    for pos, s in enumerate(kept):
+        s.position = pos
+
+
+async def _get_section(db: AsyncSession, practice_id: str, section_id: str) -> PracticeSection:
+    result = await db.execute(
+        select(PracticeSection)
+        .where(PracticeSection.id == section_id, PracticeSection.practice_id == practice_id)
+        .options(selectinload(PracticeSection.questions))
+        .execution_options(populate_existing=True))
+    section = result.scalar_one_or_none()
+    if not section:
+        raise HTTPException(404, "Section not found")
+    return section
+
+
+async def _practice_resp_after(db: AsyncSession, practice_id: str) -> PracticeResponse:
+    """结构写操作后统一返回体。"""
+    await db.commit()
+    practice = await _get_practice_full(db, practice_id)
+    return _practice_response(practice)
+
+
+@router.post("/api/practices/{practice_id}/sections", response_model=PracticeResponse)
+async def add_section(practice_id: str, req: SectionCreateRequest,
+                      db: AsyncSession = Depends(get_db)):
+    practice = await _get_practice_full(db, practice_id)
+    if not practice:
+        raise HTTPException(404, "Practice not found")
+    section = PracticeSection(
+        practice_id=practice_id, title=req.title, section_type="custom",
+        position=req.position if req.position is not None else len(practice.sections))
+    db.add(section)
+    return await _practice_resp_after(db, practice_id)
+
+
+@router.put("/api/practices/{practice_id}/sections/reorder", response_model=PracticeResponse)
+async def reorder_sections(practice_id: str, req: SectionReorderRequest,
+                           db: AsyncSession = Depends(get_db)):
+    sections = (await db.execute(
+        select(PracticeSection).where(PracticeSection.practice_id == practice_id)
+    )).scalars().all()
+    smap = {s.id: s for s in sections}
+    for pos, sid in enumerate(req.section_ids):
+        if sid in smap:
+            smap[sid].position = pos
+    return await _practice_resp_after(db, practice_id)
+
+
+@router.put("/api/practices/{practice_id}/sections/{section_id}", response_model=PracticeResponse)
+async def update_section(practice_id: str, section_id: str, req: SectionUpdateRequest,
+                         db: AsyncSession = Depends(get_db)):
+    section = await _get_section(db, practice_id, section_id)
+    for k, v in req.model_dump(exclude_unset=True).items():
+        setattr(section, k, v)
+    return await _practice_resp_after(db, practice_id)
+
+
+@router.delete("/api/practices/{practice_id}/sections/{section_id}", response_model=PracticeResponse)
+async def delete_section(practice_id: str, section_id: str, db: AsyncSession = Depends(get_db)):
+    section = await _get_section(db, practice_id, section_id)
+    if section.questions:
+        raise HTTPException(400, "小节内仍有题目，无法删除；请先移走或删除题目")
+    await db.delete(section)
+    await _renumber(db, practice_id)
+    return await _practice_resp_after(db, practice_id)
+
+
+@router.delete("/api/practices/{practice_id}/questions/{pq_id}", response_model=PracticeResponse)
+async def delete_question(practice_id: str, pq_id: str, db: AsyncSession = Depends(get_db)):
+    pq = await _load_pq(db, practice_id, pq_id)
+    await db.delete(pq)   # 块级联删除（外键 ondelete=CASCADE + ORM delete-orphan）
+    await db.flush()
+    await _renumber(db, practice_id)
+    return await _practice_resp_after(db, practice_id)
+
+
+@router.put("/api/practices/{practice_id}/questions/{pq_id}/move", response_model=PracticeResponse)
+async def move_question(practice_id: str, pq_id: str, req: QuestionMoveRequest,
+                        db: AsyncSession = Depends(get_db)):
+    pq = await _load_pq(db, practice_id, pq_id)
+    target = await _get_section(db, practice_id, req.target_section_id)
+    positions = [q.position for q in target.questions if q.id != pq.id]
+    pq.section_id = target.id
+    pq.position = req.target_position if req.target_position is not None \
+        else (max(positions, default=-1) + 1)
+    # 不改目标小节的 section_type/标题；题型不一致时由一键整理结构处理
+    await db.flush()
+    await _renumber(db, practice_id)
+    return await _practice_resp_after(db, practice_id)
+
+
+@router.put("/api/practices/{practice_id}/questions/{pq_id}", response_model=PracticeResponse)
+async def update_question_meta(practice_id: str, pq_id: str, req: QuestionMetaUpdateRequest,
+                               db: AsyncSession = Depends(get_db)):
+    pq = await _load_pq(db, practice_id, pq_id)
+    data = req.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        setattr(pq, k, v)
+    if data:
+        pq.is_modified = True  # 元数据修改也计入已修改；小节名不随之改变
+    return await _practice_resp_after(db, practice_id)
