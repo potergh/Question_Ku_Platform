@@ -100,3 +100,29 @@ async def test_assets_list(client, test_db, tmp_path):
     practice = await _create_practice(client, test_db, tmp_path)
     res = await client.get(f"/api/practices/{practice['id']}/assets-list")
     assert res.json()["assets"] and res.json()["assets"][0].endswith(".webp")
+
+
+async def test_detail_renumbers_source_numbers(client, test_db, tmp_path):
+    """题库来源编号（如 3/11）在练习中应重排为连续 1、2。"""
+    ocr_dir = tmp_path / "ocr" / "d"
+    (ocr_dir / "figures").mkdir(parents=True, exist_ok=True)
+    (ocr_dir / "figures" / "f.webp").write_bytes(_tiny_webp())
+    async with test_db() as db:
+        source = Source(filename="t.pdf", file_path="/tmp/t.pdf", file_type="pdf",
+                        ocr_status="done", ocr_result_path=str(ocr_dir))
+        db.add(source)
+        await db.commit()
+        qids = []
+        for i, num in enumerate((3, 11)):
+            q = Question(source_id=source.id, source_question_id=f"Q{i}", question_number=num,
+                         question_type="single_choice", content="纯文字题干",
+                         options=[{"label": "A", "content": "x"}])
+            db.add(q)
+            await db.flush()
+            qids.append(q.id)
+        await db.commit()
+    practice = (await client.post("/api/practices", json={
+        "title": "t", "from_basket": False, "question_ids": qids})).json()
+    detail = (await client.get(f"/api/practices/{practice['id']}/detail")).json()
+    nums = [q["question_number"] for s in detail["sections"] for q in s["questions"]]
+    assert nums == [1, 2]

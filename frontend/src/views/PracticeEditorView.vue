@@ -126,14 +126,14 @@
           <el-button size="small" text :disabled="preview.page <= 1" @click="preview.page--">‹</el-button>
           <span class="pv-pos">{{ preview.page }} / {{ preview.pages || '-' }}</span>
           <el-button size="small" text :disabled="preview.page >= preview.pages" @click="preview.page++">›</el-button>
-          <el-select v-model="preview.zoom" size="small" style="width:76px">
-            <el-option v-for="z in [0.6, 0.8, 1, 1.5, 2]" :key="z" :label="Math.round(z * 100) + '%'" :value="z" />
+          <el-select v-model="preview.zoom" size="small" style="width:96px">
+            <el-option v-for="z in [0, 1, 1.5, 2]" :key="z" :label="z ? Math.round(z * 100) + '%' : '适应宽度'" :value="z" />
           </el-select>
           <el-button size="small" text @click="showFullscreen = true" :disabled="!preview.pages">⛶</el-button>
           <el-button size="small" text @click="refreshPreview" :loading="preview.busy">↻</el-button>
         </div>
         <div class="pv-scroll" v-if="preview.pages">
-          <img :src="pageImgUrl" :style="{ width: (220 * preview.zoom) + 'px' }" />
+          <img :src="pageImgUrl" :style="preview.zoom ? { width: (794 * preview.zoom) + 'px' } : { width: '100%' }" />
         </div>
         <el-empty v-else-if="preview.busy" description="正在渲染预览…" :image-size="60" />
         <el-empty v-else description="编辑后自动刷新预览" :image-size="60" />
@@ -458,7 +458,7 @@ const updateMeta = async () => {
 
 /* ---- 预览与导出（阶段三） ---- */
 const showFullscreen = ref(false)
-const preview = reactive({ pages: 0, page: 1, sha: '', zoom: 1, busy: false })
+const preview = reactive({ pages: 0, page: 1, sha: '', zoom: 0, busy: false })   // zoom=0 适应宽度
 let previewTimer = null
 
 const pageImgUrl = computed(() => preview.pages
@@ -519,7 +519,7 @@ onMounted(async () => {
 .q-ops { display: none; }
 .tree-question:hover .q-ops { display: inline-flex; }
 .edit-panel { flex: 1; overflow-y: auto; padding: 16px; background: #fafafa; }
-.preview-panel { width: 280px; border-left: 1px solid #ebeef5; display: flex; flex-direction: column; background: #f0f2f5; }
+.preview-panel { width: 380px; border-left: 1px solid #ebeef5; display: flex; flex-direction: column; background: #f0f2f5; }
 .pv-toolbar { display: flex; align-items: center; gap: 2px; padding: 6px 8px; border-bottom: 1px solid #ebeef5; background: #fff; }
 .pv-pos { font-size: 12px; color: #606266; white-space: nowrap; }
 .pv-scroll { flex: 1; overflow: auto; padding: 10px; display: flex; justify-content: center; }

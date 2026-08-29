@@ -46,18 +46,22 @@ def _text_to_html(text: str) -> str:
     return s
 
 
+def _img_tag(b, practice_id: str, style_attr: str) -> str:
+    name = (b.content or "").removeprefix("asset://practice/")
+    src = (practice_service.practice_assets_dir(practice_id) / name).as_uri()
+    return f'<img src="{src}" style="{style_attr}">'
+
+
 def _block_html(b, practice_id: str) -> str:
     style = b.style_config or {}
     if b.block_type == "text":
         return f'<div class="q-text">{_text_to_html(b.content)}</div>'
     if b.block_type == "image":
-        name = (b.content or "").removeprefix("asset://practice/")
-        src = (practice_service.practice_assets_dir(practice_id) / name).as_uri()
         align = style.get("align", "center")
         w = style.get("width", "fit")
         width_css = "max-width:100%" if w == "fit" else f"width:{w}"
         return (f'<div class="q-img" style="text-align:{align}">'
-                f'<img src="{src}" style="{width_css};height:auto"></div>')
+                f'{_img_tag(b, practice_id, width_css + ";height:auto")}</div>')
     if b.block_type == "options":
         try:
             opts = json.loads(b.content) if b.content else []
@@ -105,14 +109,45 @@ def _section_bodies(practice: Practice, s: dict) -> list[str]:
         if section.show_title:
             out.append(f'<div class="section-title">{_html.escape(section.title)}</div>')
         for pq in section.questions:
-            blocks_html = "".join(_block_html(b, practice.id) for b in pq.blocks)
-            score_txt = ""
+            prefix = f"{pq.question_number}. "
             if s["show_score"] and pq.score is not None:
-                score_txt = f'<span class="q-score">（{pq.score:g} 分）</span>'
-            out.append(f'<div class="question">'
-                       f'<div class="q-head">{pq.question_number}. {score_txt}</div>'
-                       f'{blocks_html}</div>')
+                prefix += f"（{pq.score:g} 分）"
+            blocks = sorted(pq.blocks, key=lambda b: b.position)
+            out.append(f'<div class="question">{_blocks_html(blocks, practice.id, prefix)}</div>')
     return out
+
+
+def _blocks_html(blocks, practice_id: str, prefix: str) -> str:
+    """题号/分值并入首个文字块（与题干同行）；连续图片并排一行。"""
+    out: list[str] = []
+    imgs: list = []
+    prefix_used = False
+
+    def flush_imgs():
+        if not imgs:
+            return
+        if len(imgs) == 1:
+            out.append(_block_html(imgs[0], practice_id))
+        else:
+            cells = "".join(f'<div class="q-img-cell">{_img_tag(b, practice_id, "max-width:100%;height:auto")}</div>'
+                            for b in imgs)
+            out.append(f'<div class="q-img-row">{cells}</div>')
+        imgs.clear()
+
+    for b in blocks:
+        if b.block_type == "image":
+            imgs.append(b)
+            continue
+        flush_imgs()
+        if b.block_type == "text" and not prefix_used:
+            out.append(f'<div class="q-text"><b>{_html.escape(prefix)}</b>{_text_to_html(b.content)}</div>')
+            prefix_used = True
+        else:
+            out.append(_block_html(b, practice_id))
+    flush_imgs()
+    if not prefix_used:   # 无文字块（纯图片题）：题号单独一行并置顶
+        out.insert(0, f'<div class="q-text"><b>{_html.escape(prefix)}</b></div>')
+    return "".join(out)
 
 
 def _head_css() -> str:
@@ -129,6 +164,9 @@ def _head_css() -> str:
             '.question { margin-bottom: 12px; }'
             '.q-text { margin: 2px 0; }'
             '.q-img img { max-height: 420px; }'
+            '.q-img-row { display: flex; gap: 8px; justify-content: center; margin: 4px 0; }'
+            '.q-img-cell { flex: 1 1 0; min-width: 0; text-align: center; }'
+            '.q-img-cell img { max-width: 100%; max-height: 300px; height: auto; }'
             '.q-options { margin: 4px 0 4px 2em; }'
             '.q-option { margin: 1px 0; }'
             '.opt-label { margin-right: 4px; }'

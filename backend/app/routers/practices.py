@@ -233,7 +233,7 @@ class BlockReorderRequest(BaseModel):
 
 @router.get("/api/practices/{practice_id}/detail", response_model=PracticeResponse)
 async def get_practice_detail(practice_id: str, db: AsyncSession = Depends(get_db)):
-    """同详情，但对未物化的题目先生成内容块（懒物化）。"""
+    """同详情，但对未物化的题目先生成内容块（懒物化）；顺带幂等重排题号。"""
     practice = await _get_practice_full(db, practice_id)
     if not practice:
         raise HTTPException(404, "Practice not found")
@@ -246,6 +246,9 @@ async def get_practice_detail(practice_id: str, db: AsyncSession = Depends(get_d
     if materialized:
         await db.commit()
         practice = await _get_practice_full(db, practice_id)
+    await _renumber(db, practice_id)   # 来源编号（如 3/11）重排为连续 1、2、3…
+    await db.commit()
+    practice = await _get_practice_full(db, practice_id)
     return _practice_response(practice)
 
 
@@ -552,6 +555,9 @@ async def _load_for_render(db: AsyncSession, practice_id: str) -> Practice:
     if changed:
         await db.commit()   # materialize 只 flush；提交后必须重取（缓存已过期）
         practice = await _get_practice_full(db, practice_id)
+    await _renumber(db, practice_id)   # 导出/预览前保证题号连续（幂等）
+    await db.commit()
+    practice = await _get_practice_full(db, practice_id)
     return practice
 
 

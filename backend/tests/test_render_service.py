@@ -1,6 +1,10 @@
 """HTML 组装单测：不经浏览器，直接断言 HTML 文本。"""
 
+from docx import Document
+import io
+
 from test_blocks_api import _create_practice
+from app.services import docx_export
 from app.services.render_service import build_practice_html, render_settings
 
 
@@ -57,3 +61,41 @@ async def test_build_html_respects_page_config(client, test_db, tmp_path):
     settings = render_settings(practice)
     assert "姓名" not in html                  # 信息栏关闭
     assert settings["margin"] == "15mm"
+
+
+async def test_prefix_inline_and_img_row(client, test_db, tmp_path):
+    """题号并入题干首行；连续多图并排一行（HTML 与 Word 一致）。"""
+    # 连续两图 → materialize 出两个相邻 image 块（题号 3 顺带验证重排为 1）
+    from app.models import Source, Question
+    from test_blocks_api import _tiny_webp
+    ocr_dir = tmp_path / "ocr" / "d"
+    (ocr_dir / "figures").mkdir(parents=True, exist_ok=True)
+    (ocr_dir / "figures" / "f.webp").write_bytes(_tiny_webp())
+    async with test_db() as db:
+        source = Source(filename="t.pdf", file_path="/tmp/t.pdf", file_type="pdf",
+                        ocr_status="done", ocr_result_path=str(ocr_dir))
+        db.add(source)
+        await db.commit()
+        q = Question(source_id=source.id, source_question_id="Q1", question_number=3,
+                     question_type="short_answer",
+                     content="题干首行\n![图](asset://figures/f.webp)![图](asset://figures/f.webp)",
+                     options=None)
+        db.add(q)
+        await db.commit()
+        await db.refresh(q)
+        qid = q.id
+    practice = (await client.post("/api/practices", json={
+        "title": "t", "from_basket": False, "question_ids": [qid]})).json()
+    pid = practice["id"]
+    await client.get(f"/api/practices/{pid}/detail")   # 懒物化 + 重排题号 3→1
+    p = await _load_with_blocks(test_db, pid)
+
+    html = build_practice_html(p, pid)
+    assert '<div class="q-text"><b>1. </b>题干首行</div>' in html   # 题号与题干同行（无 ![图]( 残留）
+    assert "q-img-row" in html                                       # 连续两图并排
+    assert html.count('<div class="q-img-cell">') == 2
+
+    doc = Document(io.BytesIO(docx_export.build_docx(p, pid)))
+    texts = [para.text for para in doc.paragraphs]
+    assert "1. 题干首行" in texts                                    # Word 同样同行（且已重排）
+    assert any(len(t.rows[0].cells) == 2 for t in doc.tables)        # 两图用单行表格并排

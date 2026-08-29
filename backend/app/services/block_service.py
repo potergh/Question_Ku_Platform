@@ -1,6 +1,7 @@
 """Block service — materialize question content into editable blocks and rebuild."""
 
 import json
+import re
 from pathlib import Path
 
 from sqlalchemy import select, delete
@@ -28,6 +29,10 @@ DEFAULT_ANSWER_SPACE = {
 IMAGE_DEFAULT_STYLE = {"align": "center", "width": "fit"}
 
 
+# 图片 Markdown 包装（重建快照时会写回）：物化前剔除，避免 `![图](`/`)` 残留为文字块、隔开相邻图片
+MD_IMG_RE = re.compile(r"!\[[^\]]*\]\((asset://[^\s\)]+)\)")
+
+
 async def materialize_blocks(db: AsyncSession, pq: PracticeQuestion) -> list[PracticeContentBlock]:
     """把快照内容分解为内容块（幂等：已有块直接返回）。
     只 flush 不 commit，由调用方负责提交，避免 commit 使 pq.blocks 关系过期。"""
@@ -47,7 +52,8 @@ async def materialize_blocks(db: AsyncSession, pq: PracticeQuestion) -> list[Pra
             position=len(blocks), content=content, style_config=style,
         ))
 
-    content = pq.content_snapshot or ""
+    # 剔除后补空格：避免相邻裸引用被 ASSET_RE（[^\s\)]+）吞成同一个图片块
+    content = MD_IMG_RE.sub(r" \1 ", pq.content_snapshot or "")
     last = 0
     for m in ASSET_RE.finditer(content):
         pre = content[last:m.start()].strip()

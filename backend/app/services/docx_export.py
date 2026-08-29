@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from docx import Document
+from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
@@ -14,6 +15,7 @@ from app.services import practice_service
 from app.services.render_service import render_settings
 
 A4_W, A4_H = Cm(21), Cm(29.7)
+MAX_IMG_H = Cm(24)   # 竖长图高度封顶（A4 内容区约 24.7cm）
 
 
 def build_docx(practice, practice_id: str) -> bytes:
@@ -86,16 +88,37 @@ def _add_page_number(section):
 
 
 def _add_question(doc, pq, assets: Path, content_width, s: dict):
-    score_txt = f"（{pq.score:g} 分）" if (s["show_score"] and pq.score is not None) else ""
-    doc.add_paragraph(f"{pq.question_number}. {score_txt}".strip())
-    for b in pq.blocks:
+    prefix = f"{pq.question_number}. "
+    if s["show_score"] and pq.score is not None:
+        prefix += f"（{pq.score:g} 分）"
+    blocks = sorted(pq.blocks, key=lambda b: b.position)
+    # 无文字块（纯图片题）：题号单独一行并置顶；否则并入首个文字段（题号与题干同行）
+    prefix_used = not any(b.block_type == "text" for b in blocks)
+    if prefix_used:
+        doc.add_paragraph(prefix)
+    imgs: list = []
+
+    def flush_imgs():
+        if not imgs:
+            return
+        if len(imgs) == 1:
+            _add_image_block(doc, imgs[0], assets, content_width)
+        else:
+            _add_image_row(doc, imgs, assets, content_width)
+        imgs.clear()
+
+    for b in blocks:
+        if b.block_type == "image":
+            imgs.append(b)
+            continue
+        flush_imgs()
         style = b.style_config or {}
         if b.block_type == "text":
             # LaTeX 原样保留：Word 可继续编辑（规格 10.2），仅去除 Markdown 加粗标记
             tp = doc.add_paragraph()
-            tp.add_run((b.content or "").replace("**", ""))
-        elif b.block_type == "image":
-            _add_image_block(doc, b, assets, content_width)
+            tp.add_run(("" if prefix_used else prefix)
+                       + (b.content or "").replace("**", ""))
+            prefix_used = True
         elif b.block_type == "options":
             try:
                 opts = json.loads(b.content) if b.content else []
@@ -109,6 +132,7 @@ def _add_question(doc, pq, assets: Path, content_width, s: dict):
             for _ in range(int(style.get("rows", 0))):
                 doc.add_paragraph("")
         # answer/explanation 块学生版不输出
+    flush_imgs()
 
 
 def _add_image_block(doc, b, assets: Path, content_width):
@@ -126,9 +150,53 @@ def _add_image_block(doc, b, assets: Path, content_width):
     w = style.get("width", "fit")
     if isinstance(w, str) and w.endswith("%"):
         width = content_width * float(w.removesuffix("%")) / 100
+    if width is None:   # fit：原尺寸，超内容宽/高度封顶则等比缩小（与预览行为一致）
+        width = _fit_width(path, content_width)
     run = ip.add_run()
     run.add_picture(_picture_source(path), width=width)
-    # fit：python-docx 用图片原尺寸；超宽由 Word 内人工调整（V1 可接受）
+
+
+def _add_image_row(doc, imgs, assets: Path, content_width):
+    """连续图片并排：无边框单行表格，等宽列；单元格内居中且不超过列宽。"""
+    n = len(imgs)
+    table = doc.add_table(rows=1, cols=n)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    cell_w = content_width // n
+    for i, b in enumerate(imgs):
+        cell = table.rows[0].cells[i]
+        cell.width = cell_w
+        p = cell.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        name = (b.content or "").removeprefix("asset://practice/")
+        path = assets / name
+        if not path.exists():
+            p.add_run(f"[图片缺失：{name}]")
+            continue
+        width = _fit_width(path, cell_w)
+        p.add_run().add_picture(_picture_source(path), width=width)
+
+
+def _natural_size(path: Path):
+    """图片自然宽高（EMU）；读不出（缺 dpi 等）返回 None。"""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            px_w, px_h = im.size
+            dpi = (im.info.get("dpi") or (96, 96))[0] or 96
+        return int(px_w / dpi * 914400), int(px_h / dpi * 914400)
+    except Exception:
+        return None
+
+
+def _fit_width(path: Path, max_width):
+    """不超宽不超高：宽按 max_width 封顶，竖长图再按高度封顶反推宽度；读不到尺寸保持原样。"""
+    ns = _natural_size(path)
+    if not ns:
+        return None
+    w, h = ns
+    if h > MAX_IMG_H:
+        w = min(w, int(MAX_IMG_H * w / h))
+    return min(w, max_width) if w > max_width else (w if (w > max_width or h > MAX_IMG_H) else None)
 
 
 def _picture_source(path: Path):
