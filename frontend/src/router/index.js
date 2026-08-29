@@ -26,6 +26,11 @@ const routes = [
     component: () => import('../views/PracticeListView.vue'),
   },
   {
+    path: '/practice/editor',
+    name: 'PracticeEditor',
+    component: () => import('../views/PracticeEditorView.vue'),
+  },
+  {
     path: '/tags',
     name: 'Tags',
     component: () => import('../views/TagsView.vue'),

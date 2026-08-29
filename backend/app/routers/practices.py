@@ -67,6 +67,7 @@ def _question_out(practice_id: str, pq: PracticeQuestion) -> PracticeQuestionOut
         difficulty=pq.difficulty, score=pq.score,
         content=practice_service.resolve_practice_asset_urls(pq.content_snapshot, practice_id),
         options=pq.options_snapshot, is_modified=pq.is_modified,
+        layout_config=pq.layout_config,
         blocks=[_block_out(b, practice_id)
                 for b in sorted(pq.blocks, key=lambda b: b.position)],
     )
@@ -85,7 +86,7 @@ def _practice_response(practice: Practice) -> PracticeResponse:
         id=practice.id, title=practice.title, subtitle=practice.subtitle,
         subject=practice.subject, grade=practice.grade, status=practice.status,
         question_count=total, created_at=practice.created_at, updated_at=practice.updated_at,
-        sections=sections,
+        page_config=practice.page_config, sections=sections,
     )
 
 

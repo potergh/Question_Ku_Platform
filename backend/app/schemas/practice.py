@@ -20,6 +20,7 @@ class PracticeUpdateRequest(BaseModel):
     subtitle: str | None = None
     subject: str | None = None
     grade: str | None = None
+    page_config: dict | None = None
 
 
 class PracticeBrief(BaseModel):
@@ -53,6 +54,7 @@ class PracticeQuestionOut(BaseModel):
     content: str | None = None
     options: list | None = None
     is_modified: bool
+    layout_config: dict | None = None
     blocks: list[PracticeBlockOut] = []
 
 
@@ -76,6 +78,7 @@ class PracticeResponse(BaseModel):
     question_count: int = 0
     created_at: datetime
     updated_at: datetime | None = None
+    page_config: dict | None = None
     sections: list[PracticeSectionOut]
 
 
