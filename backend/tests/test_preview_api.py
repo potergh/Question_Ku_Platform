@@ -39,3 +39,13 @@ async def test_page_requires_render(client, test_db, tmp_path):
     practice = await _create_practice(client, test_db, tmp_path)
     res = await client.get(f"/api/practices/{practice['id']}/preview/page/1")
     assert res.status_code == 404   # 未先 POST render
+
+
+async def test_export_pdf(client, test_db, tmp_path):
+    practice = await _create_practice(client, test_db, tmp_path)
+    pid = practice["id"]
+    res = await client.get(f"/api/practices/{pid}/export/pdf")
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "application/pdf"
+    assert res.content.startswith(b"%PDF")
+    assert "filename" in res.headers.get("content-disposition", "")

@@ -594,3 +594,19 @@ async def export_docx(practice_id: str, db: AsyncSession = Depends(get_db)):
         headers={"Content-Disposition":
                  f"attachment; filename*=utf-8''{quote(_export_filename(practice.title, 'docx'))}"},
     )
+
+
+@router.get("/api/practices/{practice_id}/export/pdf")
+async def export_pdf(practice_id: str, db: AsyncSession = Depends(get_db)):
+    practice = await _load_for_render(db, practice_id)
+    html = render_service.build_practice_html(practice, practice_id)
+    settings = render_service.render_settings(practice)
+    pdf_path, _, _ = await render_service.ensure_preview_pdf(practice_id, html, settings)
+    practice.status = "exported"
+    await db.commit()
+    return StreamingResponse(
+        io.BytesIO(pdf_path.read_bytes()),
+        media_type="application/pdf",
+        headers={"Content-Disposition":
+                 f"attachment; filename*=utf-8''{quote(_export_filename(practice.title, 'pdf'))}"},
+    )
