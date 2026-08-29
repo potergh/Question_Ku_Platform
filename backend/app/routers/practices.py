@@ -1,12 +1,16 @@
 """Practice router — create from basket, list, detail, update, delete, assets, blocks."""
 
+import asyncio
+import io
 import json
+import re
 import shutil
 
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +27,7 @@ from app.schemas.practice import (
 )
 from app.services import practice_service
 from app.services import block_service
+from app.services import docx_export
 from app.services import preview_service, render_service
 
 router = APIRouter()
@@ -570,3 +575,22 @@ async def preview_page_image(practice_id: str, index: int, scale: float = 2.0):
     except IndexError:
         raise HTTPException(404, "页码超出范围")
     return Response(content=png, media_type="image/png")
+
+
+def _export_filename(title: str, ext: str) -> str:
+    clean = re.sub(r'[\\/:*?"<>|]', "_", title or "练习")
+    return f"{clean}.{ext}"
+
+
+@router.get("/api/practices/{practice_id}/export/docx")
+async def export_docx(practice_id: str, db: AsyncSession = Depends(get_db)):
+    practice = await _load_for_render(db, practice_id)
+    data = await asyncio.to_thread(docx_export.build_docx, practice, practice_id)
+    practice.status = "exported"
+    await db.commit()
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition":
+                 f"attachment; filename*=utf-8''{quote(_export_filename(practice.title, 'docx'))}"},
+    )

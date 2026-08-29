@@ -1,8 +1,19 @@
 """API tests for question content blocks."""
 
+import io
+
+from PIL import Image
+
 from app.models import Source, Question
 
 CONTENT = "题干A ![图](asset://figures/f.webp) 题干B"
+
+
+def _tiny_webp() -> bytes:
+    """1×1 真实 WebP：python-docx add_picture 需可读图片头取尺寸。"""
+    buf = io.BytesIO()
+    Image.new("RGB", (1, 1)).save(buf, "WEBP")
+    return buf.getvalue()
 
 
 async def _create_practice(client, test_db, tmp_path, content=CONTENT,
@@ -10,7 +21,7 @@ async def _create_practice(client, test_db, tmp_path, content=CONTENT,
                            options=None):
     ocr_dir = tmp_path / "ocr" / "d"
     (ocr_dir / "figures").mkdir(parents=True, exist_ok=True)
-    (ocr_dir / "figures" / "f.webp").write_bytes(b"img")
+    (ocr_dir / "figures" / "f.webp").write_bytes(_tiny_webp())
     async with test_db() as db:
         source = Source(filename="t.pdf", file_path="/tmp/t.pdf", file_type="pdf",
                         ocr_status="done", ocr_result_path=str(ocr_dir))
