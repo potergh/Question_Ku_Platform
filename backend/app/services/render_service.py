@@ -52,6 +52,28 @@ def _img_tag(b, practice_id: str, style_attr: str) -> str:
     return f'<img src="{src}" style="{style_attr}">'
 
 
+# fit 默认上限：宽不超内容区 50%、高不超 8cm（与 docx 导出同源，避免普遍偏大/忽大忽小）
+FIT_STYLE = "max-width:50%;max-height:8cm"
+
+# 选项/文本中的图片引用（含 Markdown 包装），渲染时转内联 <img>
+_OPT_IMG_RE = re.compile(r"!\[[^\]]*\]\((asset://[^\s\)]+)\)|(asset://[^\s\)]+)")
+
+
+def _inline_imgs_html(text: str, practice_id: str) -> str:
+    """文字中的图片引用 → 内联 <img>（选项图）；其余文本正常转义。"""
+    assets = practice_service.practice_assets_dir(practice_id)
+    out: list[str] = []
+    last = 0
+    for m in _OPT_IMG_RE.finditer(text or ""):
+        out.append(_text_to_html(text[last:m.start()]))
+        name = (m.group(1) or m.group(2)).removeprefix("asset://practice/")
+        src = (assets / name).as_uri()
+        out.append(f'<img src="{src}" style="max-height:3.4em;vertical-align:middle">')
+        last = m.end()
+    out.append(_text_to_html((text or "")[last:]))
+    return "".join(out)
+
+
 def _block_html(b, practice_id: str) -> str:
     style = b.style_config or {}
     if b.block_type == "text":
@@ -59,7 +81,7 @@ def _block_html(b, practice_id: str) -> str:
     if b.block_type == "image":
         align = style.get("align", "center")
         w = style.get("width", "fit")
-        width_css = "max-width:100%" if w == "fit" else f"width:{w}"
+        width_css = FIT_STYLE if w == "fit" else f"width:{w}"
         return (f'<div class="q-img" style="text-align:{align}">'
                 f'{_img_tag(b, practice_id, width_css + ";height:auto")}</div>')
     if b.block_type == "options":
@@ -69,7 +91,7 @@ def _block_html(b, practice_id: str) -> str:
             opts = []
         rows = "".join(
             f'<div class="q-option"><span class="opt-label">{_html.escape(o.get("label", ""))}.</span>'
-            f'{_text_to_html(o.get("content", ""))}</div>' for o in opts)
+            f'{_inline_imgs_html(o.get("content", ""), practice_id)}</div>' for o in opts)
         return f'<div class="q-options">{rows}</div>'
     if b.block_type == "answer_space":
         rows = int(style.get("rows", 0))
@@ -164,6 +186,7 @@ def _head_css() -> str:
             '.question { margin-bottom: 12px; }'
             '.q-text { margin: 2px 0; }'
             '.q-img img { max-height: 420px; }'
+            '.q-option img { max-height: 3.4em; }'
             '.q-img-row { display: flex; gap: 8px; justify-content: center; margin: 4px 0; }'
             '.q-img-cell { flex: 1 1 0; min-width: 0; text-align: center; }'
             '.q-img-cell img { max-width: 100%; max-height: 300px; height: auto; }'

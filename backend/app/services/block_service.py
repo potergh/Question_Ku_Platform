@@ -14,6 +14,7 @@ from app.services.practice_service import (
     ASSET_RE,
     SECTION_TYPE_ORDER,
     _copy_referenced_assets,
+    migrate_option_refs,
     practice_assets_dir,
 )
 from app.utils.question_types import map_question_type
@@ -120,7 +121,12 @@ async def restore_question_from_source(db: AsyncSession, pq: PracticeQuestion) -
     pq.difficulty = source_q.difficulty
     pq.score = source_q.score
     pq.content_snapshot = content
-    pq.options_snapshot = source_q.options
+    # 选项引用同样迁入练习资产（与创建快照一致）
+    new_opts = []
+    for o in (source_q.options or []):
+        c = await migrate_option_refs(db, pq.practice_id, o.get("content"), ocr_dir)
+        new_opts.append({**o, "content": c} if c != o.get("content") else o)
+    pq.options_snapshot = new_opts or source_q.options
     pq.answer_snapshot = source_q.answer
     pq.explanation_snapshot = source_q.explanation
     pq.source_version = source_q.updated_at

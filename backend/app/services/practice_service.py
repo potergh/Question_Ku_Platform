@@ -1,5 +1,6 @@
 """Practice service — basket helpers, snapshot creation, asset copying."""
 
+import json
 import re
 import shutil
 import uuid
@@ -85,6 +86,15 @@ async def snapshot_question(
         source_version=question.updated_at,
     )
     db.add(pq)
+    await db.flush()
+    await db.refresh(pq)
+    # 选项中的图片引用同样复制进练习资产（否则导出/预览时选项图显示为 Markdown 文本）
+    if question.options:
+        new_opts = []
+        for o in question.options:
+            c = await migrate_option_refs(db, practice.id, o.get("content"), ocr_dir)
+            new_opts.append({**o, "content": c} if c != o.get("content") else o)
+        pq.options_snapshot = new_opts
     return pq
 
 
@@ -105,6 +115,88 @@ def _copy_referenced_assets(content: str | None, ocr_dir: Path | None, assets_di
         return f"asset://practice/{name}"
 
     return ASSET_RE.sub(_replace, content)
+
+
+# 选项/文本中的图片引用（含 Markdown 包装；替换只动内层引用，包装保留）
+_MD_IMG_REF_RE = re.compile(
+    r"(!\[[^\]]*\]\()?(/api/ocr-assets/[^\s\)]+|asset://[^\s\)]+)(\))?")
+
+
+async def migrate_option_refs(db: AsyncSession, practice_id: str, content: str | None,
+                              ocr_dir: Path | None = None) -> str | None:
+    """把选项引用的外部图片（/api/ocr-assets/… 或 asset://…）复制到练习资产并改写，
+    使练习自包含（源文件删除后仍可导出）。幂等：已是 practice 资产的引用不动。
+    ocr_dir：裸 asset:// 引用的解析根（未传则该形式保留原样）。"""
+    if not content or ("/api/ocr-assets/" not in content and "asset://" not in content):
+        return content
+    assets_dir = practice_assets_dir(practice_id)
+    ocr_cache: dict[str, Path | None] = {}
+
+    async def _ocr_dir(source_id: str) -> Path | None:
+        if source_id not in ocr_cache:
+            source = await db.get(Source, source_id)
+            ocr_cache[source_id] = (Path(source.ocr_result_path)
+                                    if source and source.ocr_result_path else None)
+        return ocr_cache[source_id]
+
+    async def _replace(m):
+        pre, ref, post = m.group(1) or "", m.group(2), m.group(3) or ""
+        if ref.startswith("/api/ocr-assets/"):
+            parts = ref.removeprefix("/api/ocr-assets/").split("/", 1)
+            if len(parts) != 2:
+                return m.group(0)
+            ocr_root = await _ocr_dir(parts[0])
+            src = ocr_root / parts[1] if ocr_root else None
+        else:
+            rel = re.sub(r"^figures/figures/", "figures/", ref.removeprefix("asset://"))
+            if rel.startswith("practice/"):
+                return m.group(0)   # 已迁移（幂等）
+            src = ocr_dir / rel if ocr_dir else None
+        if not src or not src.exists():
+            return m.group(0)   # 文件缺失，保留原引用（导出时显示文字）
+        name = f"{uuid.uuid4().hex[:8]}_{src.name}"
+        shutil.copy2(src, assets_dir / name)
+        return f"{pre}asset://practice/{name}{post}"
+
+    # 逐段处理（替换函数为 async，re.sub 不支持，手动切分）
+    out: list[str] = []
+    last = 0
+    for m in _MD_IMG_REF_RE.finditer(content):
+        out.append(content[last:m.start()])
+        out.append(await _replace(m))
+        last = m.end()
+    out.append(content[last:])
+    return "".join(out)
+
+
+async def migrate_question_option_blocks(db: AsyncSession, practice_id: str, pq) -> bool:
+    """幂等迁移题目选项块中的外部图片引用；返回是否有变更（调用方负责 commit）。"""
+    changed = False
+    ocr_dir: Path | None = None
+    if pq.source_question_id:
+        q = await db.get(Question, pq.source_question_id)
+        source = await db.get(Source, q.source_id) if q else None
+        if source and source.ocr_result_path:
+            ocr_dir = Path(source.ocr_result_path)
+    for b in pq.blocks:
+        if b.block_type != "options":
+            continue
+        try:
+            opts = json.loads(b.content) if b.content else []
+        except (TypeError, json.JSONDecodeError):
+            continue
+        new_opts, opt_changed = [], False
+        for o in opts:
+            c = await migrate_option_refs(db, practice_id, o.get("content"), ocr_dir)
+            if c != o.get("content"):
+                o = dict(o)
+                o["content"] = c
+                opt_changed = True
+            new_opts.append(o)
+        if opt_changed:
+            b.content = json.dumps(new_opts, ensure_ascii=False)
+            changed = True
+    return changed
 
 
 async def create_practice_from_questions(

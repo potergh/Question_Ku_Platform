@@ -99,3 +99,51 @@ async def test_prefix_inline_and_img_row(client, test_db, tmp_path):
     texts = [para.text for para in doc.paragraphs]
     assert "1. 题干首行" in texts                                    # Word 同样同行（且已重排）
     assert any(len(t.rows[0].cells) == 2 for t in doc.tables)        # 两图用单行表格并排
+
+
+def _opts_doc(tmp_path):
+    """选项含图片引用的题目（题库原始引用格式）。"""
+    return [{"label": "A", "content": "![figure](asset://figures/f.webp)"},
+            {"label": "B", "content": "纯文字选项"}]
+
+
+async def test_option_images_migrate_and_render(client, test_db, tmp_path):
+    """选项图片：创建时迁入练习资产，预览/导出均内联显示而非 Markdown 文本。"""
+    from PIL import Image
+    practice = await _create_practice(client, test_db, tmp_path,
+                                      content="题干无图", options=_opts_doc(tmp_path))
+    pid = practice["id"]
+    detail = (await client.get(f"/api/practices/{pid}/detail")).json()
+    opts_block = next(b for q in detail["sections"][0]["questions"] for b in q["blocks"]
+                      if b["block_type"] == "options")
+    opt_a = opts_block["content"][0]["content"]
+    assert "asset://practice/" in opt_a and "figures/f.webp)" not in opt_a  # 已迁入资产
+    assets = (await client.get(f"/api/practices/{pid}/assets-list")).json()["assets"]
+    assert len(assets) == 1                                                    # 幂等：不重复复制
+    (await client.get(f"/api/practices/{pid}/detail"))
+    assert len((await client.get(f"/api/practices/{pid}/assets-list")).json()["assets"]) == 1
+
+    p = await _load_with_blocks(test_db, pid)
+    html = build_practice_html(p, pid)
+    assert "![" not in html and "max-height:3.4em" in html                     # HTML 内联 <img>
+    doc = Document(io.BytesIO(docx_export.build_docx(p, pid)))
+    opt_paras = [para for para in doc.paragraphs if para.text.startswith("A.")]
+    assert opt_paras and any("graphic" in r._r.xml for r in opt_paras[0].runs)  # Word 行内图
+    assert "![figure]" not in "".join(para.text for para in doc.paragraphs)
+
+
+async def test_fit_width_capped(client, test_db, tmp_path):
+    """fit 默认上限：宽图不超内容区 50%（800px@96dpi≈20cm → 封顶 8cm）。"""
+    from PIL import Image
+    ocr_dir = tmp_path / "ocr" / "d" / "figures"
+    ocr_dir.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (800, 100)).save(ocr_dir / "big.png")
+    practice = await _create_practice(client, test_db, tmp_path,
+                                      content="题干\n![图](asset://figures/big.png)")
+    pid = practice["id"]
+    await client.get(f"/api/practices/{pid}/detail")
+    p = await _load_with_blocks(test_db, pid)
+    doc = Document(io.BytesIO(docx_export.build_docx(p, pid)))
+    shape = doc.inline_shapes[0]
+    content_width = docx_export.A4_W - 2 * docx_export.Cm(2.5)   # 默认 normal 边距 25mm
+    assert shape.width == int(content_width / 2)                   # 恰好封顶到 50%

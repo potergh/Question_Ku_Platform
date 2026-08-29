@@ -127,13 +127,13 @@
           <span class="pv-pos">{{ preview.page }} / {{ preview.pages || '-' }}</span>
           <el-button size="small" text :disabled="preview.page >= preview.pages" @click="preview.page++">›</el-button>
           <el-select v-model="preview.zoom" size="small" style="width:96px">
-            <el-option v-for="z in [0, 1, 1.5, 2]" :key="z" :label="z ? Math.round(z * 100) + '%' : '适应宽度'" :value="z" />
+            <el-option v-for="z in [1, 1.5, 2]" :key="z" :label="Math.round(z * 100) + '%'" :value="z" />
           </el-select>
           <el-button size="small" text @click="showFullscreen = true" :disabled="!preview.pages">⛶</el-button>
           <el-button size="small" text @click="refreshPreview" :loading="preview.busy">↻</el-button>
         </div>
-        <div class="pv-scroll" v-if="preview.pages">
-          <img :src="pageImgUrl" :style="preview.zoom ? { width: (794 * preview.zoom) + 'px' } : { width: '100%' }" />
+        <div class="pv-scroll" ref="pvPanel" v-if="preview.pages">
+          <img :src="pageImgUrl" :style="{ width: pvImgWidth }" />
         </div>
         <el-empty v-else-if="preview.busy" description="正在渲染预览…" :image-size="60" />
         <el-empty v-else description="编辑后自动刷新预览" :image-size="60" />
@@ -214,7 +214,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -458,8 +458,24 @@ const updateMeta = async () => {
 
 /* ---- 预览与导出（阶段三） ---- */
 const showFullscreen = ref(false)
-const preview = reactive({ pages: 0, page: 1, sha: '', zoom: 0, busy: false })   // zoom=0 适应宽度
+const preview = reactive({ pages: 0, page: 1, sha: '', zoom: 1, busy: false })   // zoom 相对铺满宽：1=100%
 let previewTimer = null
+
+// 预览图宽 = 面板内宽 × 缩放（100% 即铺满面板，不再按绝对 794px 溢出）
+const pvPanel = ref(null)
+const pvWidth = ref(340)
+let pvObserver = null
+onMounted(() => {
+  pvObserver = new ResizeObserver(() => {
+    if (pvPanel.value) pvWidth.value = pvPanel.value.clientWidth
+  })
+})
+watch(() => pvPanel.value, el => { if (el && pvObserver) pvObserver.observe(el) })
+onBeforeUnmount(() => pvObserver && pvObserver.disconnect())
+const pvImgWidth = computed(() => {
+  const base = Math.max(pvWidth.value - 24, 200)
+  return (base * (preview.zoom || 1)) + 'px'
+})
 
 const pageImgUrl = computed(() => preview.pages
   ? `/api/practices/${practiceId}/preview/page/${preview.page}?scale=2&t=${preview.sha}`
@@ -533,7 +549,7 @@ onMounted(async () => {
 .qe-block { background: #fff; border: 1px solid #ebeef5; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
 .block-tools { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
 .block-tools .el-button { padding: 0 4px; }
-.img-block img { max-height: 160px; border-radius: 4px; }
+.img-block img { max-width: 100%; max-height: 240px; border-radius: 4px; }
 .option-row { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
 .space-block { color: #909399; font-size: 13px; }
 .qe-actions { margin-top: 12px; }

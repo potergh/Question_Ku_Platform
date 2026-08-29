@@ -246,10 +246,22 @@ async def get_practice_detail(practice_id: str, db: AsyncSession = Depends(get_d
     if materialized:
         await db.commit()
         practice = await _get_practice_full(db, practice_id)
+    if await _migrate_option_images(db, practice_id, practice):   # 选项图引用迁入练习资产（幂等）
+        await db.commit()
     await _renumber(db, practice_id)   # 来源编号（如 3/11）重排为连续 1、2、3…
     await db.commit()
     practice = await _get_practice_full(db, practice_id)
     return _practice_response(practice)
+
+
+async def _migrate_option_images(db: AsyncSession, practice_id: str, practice) -> bool:
+    """旧练习的选项块可能还留着 /api/ocr-assets 等外部引用，幂等迁入练习资产。"""
+    changed = False
+    for sec in practice.sections:
+        for pq in sec.questions:
+            if await practice_service.migrate_question_option_blocks(db, practice_id, pq):
+                changed = True
+    return changed
 
 
 @router.get("/api/practices/{practice_id}/assets-list")
@@ -554,6 +566,9 @@ async def _load_for_render(db: AsyncSession, practice_id: str) -> Practice:
                 changed = True
     if changed:
         await db.commit()   # materialize 只 flush；提交后必须重取（缓存已过期）
+        practice = await _get_practice_full(db, practice_id)
+    if await _migrate_option_images(db, practice_id, practice):
+        await db.commit()
         practice = await _get_practice_full(db, practice_id)
     await _renumber(db, practice_id)   # 导出/预览前保证题号连续（幂等）
     await db.commit()

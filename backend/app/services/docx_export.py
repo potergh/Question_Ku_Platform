@@ -2,6 +2,7 @@
 
 import io
 import json
+import re
 from pathlib import Path
 
 from docx import Document
@@ -15,7 +16,8 @@ from app.services import practice_service
 from app.services.render_service import render_settings
 
 A4_W, A4_H = Cm(21), Cm(29.7)
-MAX_IMG_H = Cm(24)   # 竖长图高度封顶（A4 内容区约 24.7cm）
+MAX_IMG_H = Cm(24)       # 竖长图高度硬封顶（A4 内容区约 24.7cm）
+FIT_MAX_H = Cm(8)        # fit 默认上限：与预览同源，避免图片普遍偏大/忽大忽小
 
 
 def build_docx(practice, practice_id: str) -> bytes:
@@ -127,12 +129,30 @@ def _add_question(doc, pq, assets: Path, content_width, s: dict):
             for o in opts:
                 op = doc.add_paragraph()
                 op.paragraph_format.left_indent = Cm(0.74)
-                op.add_run(f"{o.get('label', '')}. {o.get('content', '')}")
+                op.add_run(f"{o.get('label', '')}. ")
+                _add_rich_runs(op, o.get("content", ""), assets)
         elif b.block_type == "answer_space":
             for _ in range(int(style.get("rows", 0))):
                 doc.add_paragraph("")
         # answer/explanation 块学生版不输出
     flush_imgs()
+
+
+def _add_rich_runs(paragraph, content: str, assets: Path):
+    """选项文字中的图片引用 → 行内图片（随文字基线排版）。"""
+    last = 0
+    for m in re.finditer(r"!\[[^\]]*\]\((asset://[^\s\)]+)\)|(asset://[^\s\)]+)", content or ""):
+        if m.start() > last:
+            paragraph.add_run(content[last:m.start()])
+        name = (m.group(1) or m.group(2)).removeprefix("asset://practice/")
+        path = assets / name
+        if path.exists():
+            paragraph.add_run().add_picture(_picture_source(path), height=Cm(0.9))
+        else:
+            paragraph.add_run(f"[图缺失:{name}]")
+        last = m.end()
+    if last < len(content or ""):
+        paragraph.add_run(content[last:])
 
 
 def _add_image_block(doc, b, assets: Path, content_width):
@@ -150,7 +170,7 @@ def _add_image_block(doc, b, assets: Path, content_width):
     w = style.get("width", "fit")
     if isinstance(w, str) and w.endswith("%"):
         width = content_width * float(w.removesuffix("%")) / 100
-    if width is None:   # fit：原尺寸，超内容宽/高度封顶则等比缩小（与预览行为一致）
+    if width is None:   # fit：原尺寸，受默认上限（内容区 50% 宽 / 8cm 高）与硬封顶约束
         width = _fit_width(path, content_width)
     run = ip.add_run()
     run.add_picture(_picture_source(path), width=width)
@@ -177,26 +197,30 @@ def _add_image_row(doc, imgs, assets: Path, content_width):
 
 
 def _natural_size(path: Path):
-    """图片自然宽高（EMU）；读不出（缺 dpi 等）返回 None。"""
+    """图片自然宽高（EMU）。忽略文件内嵌 dpi（各图 96/300 不一导致忽大忽小），统一按 96 折算。"""
     try:
         from PIL import Image
         with Image.open(path) as im:
             px_w, px_h = im.size
-            dpi = (im.info.get("dpi") or (96, 96))[0] or 96
-        return int(px_w / dpi * 914400), int(px_h / dpi * 914400)
+        return int(px_w / 96 * 914400), int(px_h / 96 * 914400)
     except Exception:
         return None
 
 
 def _fit_width(path: Path, max_width):
-    """不超宽不超高：宽按 max_width 封顶，竖长图再按高度封顶反推宽度；读不到尺寸保持原样。"""
+    """fit：宽受 max_width 与默认上限（内容区 50%）双重封顶，高度封顶后再反推宽度；读不到尺寸保持原样。"""
     ns = _natural_size(path)
     if not ns:
         return None
     w, h = ns
+    cap_w = min(max_width, int(max_width / 2))
+    if h > FIT_MAX_H:
+        w = int(w * FIT_MAX_H / h)
     if h > MAX_IMG_H:
-        w = min(w, int(MAX_IMG_H * w / h))
-    return min(w, max_width) if w > max_width else (w if (w > max_width or h > MAX_IMG_H) else None)
+        w = min(w, int(w * MAX_IMG_H / h))
+    if w >= cap_w:
+        return cap_w
+    return w if (w != ns[0] or h != ns[1]) else None
 
 
 def _picture_source(path: Path):
