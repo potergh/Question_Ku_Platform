@@ -5,7 +5,7 @@ import shutil
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func, delete
@@ -19,9 +19,11 @@ from app.models.practice import Practice, PracticeContentBlock, PracticeQuestion
 from app.schemas.practice import (
     PracticeBrief, PracticeCreateRequest, PracticeListResponse,
     PracticeQuestionOut, PracticeResponse, PracticeSectionOut, PracticeUpdateRequest,
+    PreviewRenderResponse,
 )
 from app.services import practice_service
 from app.services import block_service
+from app.services import preview_service, render_service
 
 router = APIRouter()
 
@@ -527,3 +529,44 @@ async def layout_unify(practice_id: str, db: AsyncSession = Depends(get_db)):
         practice = await _get_practice_full(db, practice_id)
     n = await block_service.unify_layout(db, practice)
     return {"adjusted": n}
+
+
+# ---------------- 预览与导出（阶段三） ----------------
+
+async def _load_for_render(db: AsyncSession, practice_id: str) -> Practice:
+    """渲染专用加载：懒物化块 + 三层 selectinload + populate_existing。"""
+    practice = await _get_practice_full(db, practice_id)
+    if not practice:
+        raise HTTPException(404, "Practice not found")
+    changed = False
+    for sec in practice.sections:
+        for pq in sec.questions:
+            if not pq.blocks:
+                await block_service.materialize_blocks(db, pq)
+                changed = True
+    if changed:
+        await db.commit()   # materialize 只 flush；提交后必须重取（缓存已过期）
+        practice = await _get_practice_full(db, practice_id)
+    return practice
+
+
+@router.post("/api/practices/{practice_id}/render", response_model=PreviewRenderResponse)
+async def render_practice_preview(practice_id: str, db: AsyncSession = Depends(get_db)):
+    practice = await _load_for_render(db, practice_id)
+    html = render_service.build_practice_html(practice, practice_id)
+    settings = render_service.render_settings(practice)
+    _, sha, pages = await render_service.ensure_preview_pdf(practice_id, html, settings)
+    return PreviewRenderResponse(pages=pages, sha=sha)
+
+
+@router.get("/api/practices/{practice_id}/preview/page/{index}")
+async def preview_page_image(practice_id: str, index: int, scale: float = 2.0):
+    pdir = practice_service.practices_root() / practice_id
+    pdf_path, meta_path = pdir / "preview.pdf", pdir / "preview_meta.json"
+    if not pdf_path.exists() or not meta_path.exists():
+        raise HTTPException(404, "请先调用 POST /render 生成预览")
+    try:
+        png = preview_service.page_png(pdf_path, index, min(max(scale, 0.5), 4.0))
+    except IndexError:
+        raise HTTPException(404, "页码超出范围")
+    return Response(content=png, media_type="image/png")

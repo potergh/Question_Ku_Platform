@@ -1,14 +1,20 @@
 """Render service — 练习块 → 独立 HTML（供 Playwright 出 PDF）。"""
 
+import hashlib
 import html as _html
 import json
 import re
+import shutil
+import tempfile
 from pathlib import Path
 
 from app.models.practice import Practice
 from app.services import practice_service
 
 MARGIN_PRESETS = {"narrow": "15mm", "normal": "25mm", "wide": "32mm"}
+
+PAGE_FOOTER = ('<div style="width:100%;text-align:center;font-size:8px;color:#555;">'
+               '第 <span class="pageNumber"></span> 页 / 共 <span class="totalPages"></span> 页</div>')
 
 
 def katex_dist_dir() -> Path:
@@ -140,3 +146,46 @@ def _katex_tags() -> str:
             '{left:"$$",right:"$$",display:true},{left:"\\\\[",right:"\\\\]",display:true},'
             '{left:"$",right:"$",display:false},{left:"\\\\(",right:"\\\\)",display:false}]});'
             'window.__katexDone = true;});</script>')
+
+
+async def render_pdf_bytes(html: str, settings: dict) -> bytes:
+    """HTML → A4 PDF：临时目录内 page.html + katex/ 子目录，file:// 加载（离线可用）。"""
+    from playwright.async_api import async_playwright
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "practice.html").write_text(html, encoding="utf-8")
+        shutil.copytree(katex_dist_dir(), root / "katex")
+        async with async_playwright() as p:
+            browser = await p.chromium.launch()
+            try:
+                page = await browser.new_page()
+                await page.goto((root / "practice.html").as_uri(), wait_until="load")
+                await page.wait_for_function("window.__katexDone === true", timeout=15000)
+                margin = settings["margin"]
+                # 页码脚注预留 10mm：Chromium pdf margin 只收数值长度，不支持 calc()
+                bottom_mm = float(margin.removesuffix("mm")) + (10 if settings["show_page_number"] else 0)
+                return await page.pdf(
+                    format="A4", print_background=True,
+                    margin={"top": margin, "bottom": f"{bottom_mm}mm", "left": margin, "right": margin},
+                    display_header_footer=settings["show_page_number"],
+                    header_template="<div></div>", footer_template=PAGE_FOOTER,
+                )
+            finally:
+                await browser.close()
+
+
+async def ensure_preview_pdf(practice_id: str, html: str, settings: dict) -> tuple[Path, str, int]:
+    """缓存预览 PDF；sha 命中则跳过浏览器。返回 (路径, sha, 页数)。"""
+    from app.services.preview_service import pdf_page_count
+    sha = hashlib.sha1(html.encode("utf-8")).hexdigest()
+    pdir = practice_service.practices_root() / practice_id
+    pdf_path, meta_path = pdir / "preview.pdf", pdir / "preview_meta.json"
+    if pdf_path.exists() and meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if meta.get("sha") == sha:
+            return pdf_path, sha, meta["pages"]
+    pdf = await render_pdf_bytes(html, settings)
+    pdf_path.write_bytes(pdf)
+    pages = pdf_page_count(pdf_path)
+    meta_path.write_text(json.dumps({"sha": sha, "pages": pages}), encoding="utf-8")
+    return pdf_path, sha, pages

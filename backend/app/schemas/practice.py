@@ -43,6 +43,11 @@ class PracticeBlockOut(BaseModel):
     style: dict | None = None
 
 
+class PreviewRenderResponse(BaseModel):
+    pages: int
+    sha: str
+
+
 class PracticeQuestionOut(BaseModel):
     id: str
     position: int
