@@ -1,5 +1,6 @@
 """Render service — 练习块 → 独立 HTML（供 Playwright 出 PDF）。"""
 
+import asyncio
 import hashlib
 import html as _html
 import json
@@ -149,29 +150,35 @@ def _katex_tags() -> str:
 
 
 async def render_pdf_bytes(html: str, settings: dict) -> bytes:
-    """HTML → A4 PDF：临时目录内 page.html + katex/ 子目录，file:// 加载（离线可用）。"""
-    from playwright.async_api import async_playwright
+    """HTML → A4 PDF：工作线程内同步 Playwright，不依赖运行中循环类型。
+    （Windows + --reload 下 uvicorn 0.52 默认 SelectorEventLoop 不支持 asyncio 子进程）"""
+    return await asyncio.to_thread(_render_pdf_bytes_sync, html, settings)
+
+
+def _render_pdf_bytes_sync(html: str, settings: dict) -> bytes:
+    """临时目录内 practice.html + katex/ 子目录，file:// 加载（离线可用）。"""
+    from playwright.sync_api import sync_playwright
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         (root / "practice.html").write_text(html, encoding="utf-8")
         shutil.copytree(katex_dist_dir(), root / "katex")
-        async with async_playwright() as p:
-            browser = await p.chromium.launch()
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
             try:
-                page = await browser.new_page()
-                await page.goto((root / "practice.html").as_uri(), wait_until="load")
-                await page.wait_for_function("window.__katexDone === true", timeout=15000)
+                page = browser.new_page()
+                page.goto((root / "practice.html").as_uri(), wait_until="load")
+                page.wait_for_function("window.__katexDone === true", timeout=15000)
                 margin = settings["margin"]
                 # 页码脚注预留 10mm：Chromium pdf margin 只收数值长度，不支持 calc()
                 bottom_mm = float(margin.removesuffix("mm")) + (10 if settings["show_page_number"] else 0)
-                return await page.pdf(
+                return page.pdf(
                     format="A4", print_background=True,
                     margin={"top": margin, "bottom": f"{bottom_mm}mm", "left": margin, "right": margin},
                     display_header_footer=settings["show_page_number"],
                     header_template="<div></div>", footer_template=PAGE_FOOTER,
                 )
             finally:
-                await browser.close()
+                browser.close()
 
 
 async def ensure_preview_pdf(practice_id: str, html: str, settings: dict) -> tuple[Path, str, int]:

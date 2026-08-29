@@ -1026,3 +1026,15 @@ git commit -m "docs: 阶段三计划偏差记录（如有）"
 | 11.3 导出设置（文件名/页边距/页码/信息栏/分值/总分） | Task 1（render_settings）+ Task 5（设置对话框）；纸张 A4 纵向固定 |
 | 场景三 | Task 6 冒烟与手工清单 |
 | 决策 8 | 全管线：预览与 PDF 共用 Playwright 渲染 + 缓存 |
+
+---
+
+## 实施偏差记录（阶段三）
+
+1. **PyMuPDF 导入名**：1.28.2 已弃用 `import fitz`，`preview_service.py` 改用 `import pymupdf`。
+2. **python-docx 不认 WebP**：`add_picture` 读图头取尺寸，对 webp 抛 `UnrecognizedImageError`（OCR 资产多为 webp）。`docx_export.py` 增加 `_picture_source()`：非常见光栅格式先用 PIL 转 PNG 流再插入；`test_blocks_api.py` fixture 的假图同步换成 PIL 生成的真实 1×1 WebP。
+3. **测试数基线**：计划预估各任务后 42/45 项有偏差，实际 T2 后 45、T3 后 47、T4 后 48（39 阶段二 + 3 render + 3 预览 + 2 docx + 1 pdf），收尾时 48 项全过。
+4. **Playwright 改同步跑在工作线程**：冒烟时发现 Windows + `--reload` 下 uvicorn 0.52 默认给服务器 `SelectorEventLoop`（`use_subprocess=True` 分支），不支持 asyncio 子进程，`POST /render` 报 `NotImplementedError`。尝试自定义 `--loop` 工厂需改启动命令且与 reload 子进程共享 socket 冲突；最终把 `render_pdf_bytes` 改为 `asyncio.to_thread` + 同步 `sync_playwright`，不再依赖运行中循环类型，启动命令保持默认。测试环境（pytest-asyncio 默认 Proactor）不受影响。
+5. **PowerShell 参数模式拼接陷阱**：冒烟脚本内 `'…' + $var + '…'` 作为命令实参时 `+` 不作运算符，请求体被截断（422）；改为先赋值变量再传参。
+6. **路由额外导入**：导出端点用到的 `asyncio`、`io`、`re`、`quote`、`StreamingResponse`、`docx_export` 均按计划补入 `practices.py` 顶部，无其他偏离。
+
