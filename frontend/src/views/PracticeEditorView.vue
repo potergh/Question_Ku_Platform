@@ -50,9 +50,72 @@
         <el-empty v-if="!practice?.sections?.length" description="暂无题目" :image-size="60" />
       </div>
 
-      <!-- 中：块编辑区（Task 6 实现） -->
+      <!-- 中：块编辑区 -->
       <div class="edit-panel">
         <el-empty v-if="!selected" description="从左侧选择一道题开始编辑" />
+        <div v-else class="question-editor">
+          <div class="qe-header">
+            <b>第 {{ selected.question_number }} 题</b>
+            <el-tag v-if="selected.is_modified" size="small" type="warning">已修改</el-tag>
+            <el-select v-model="selected.question_type" size="small" style="width:110px" @change="updateMeta">
+              <el-option v-for="(zh, k) in QUESTION_TYPE_MAP" :key="k" :label="zh" :value="k" />
+            </el-select>
+            <el-select v-model="selected.difficulty" size="small" placeholder="难度" clearable style="width:90px" @change="updateMeta">
+              <el-option v-for="d in 5" :key="d" :label="`${d} 级`" :value="d" />
+            </el-select>
+            <el-input-number v-model="selected.score" size="small" :min="0" :precision="1" placeholder="分值" controls-position="right" style="width:110px" @change="updateMeta" />
+            <span class="flex-gap" />
+            <el-button size="small" @click="restoreQuestion"><el-icon><RefreshLeft /></el-icon> 恢复题库版本</el-button>
+          </div>
+
+          <div v-for="b in selected.blocks" :key="b.id" class="qe-block">
+            <div class="block-tools">
+              <el-tag size="small" type="info">{{ BLOCK_LABEL[b.block_type] }}</el-tag>
+              <el-button size="small" text @click="moveBlock(b, -1)">↑</el-button>
+              <el-button size="small" text @click="moveBlock(b, 1)">↓</el-button>
+              <template v-if="b.block_type === 'text'">
+                <el-button size="small" text @click="insertTextAfter(b)">+文字</el-button>
+              </template>
+              <template v-if="b.block_type === 'image'">
+                <el-select v-model="b.style.align" size="small" style="width:88px" @change="saveStyle(b)">
+                  <el-option label="左对齐" value="left" /><el-option label="居中" value="center" /><el-option label="右对齐" value="right" />
+                </el-select>
+                <el-select :model-value="WIDTH_PRESET_MAP[b.style.width] || 'custom'" size="small" style="width:96px" @change="v => applyWidth(b, v)">
+                  <el-option v-for="w in WIDTH_PRESETS" :key="w.value" :label="w.label" :value="w.value" />
+                  <el-option label="自定义" value="custom" />
+                </el-select>
+                <el-input-number v-if="WIDTH_PRESET_MAP[b.style.width] === undefined" v-model="customWidth" size="small" :min="10" :max="100" style="width:96px" @change="v => { b.style.width = v + '%'; saveStyle(b) }" />
+              </template>
+              <template v-if="b.block_type === 'answer_space'">
+                <el-select :model-value="b.style.rows" size="small" style="width:104px" @change="v => { b.style.rows = Number(v); saveStyle(b) }">
+                  <el-option label="无留白" :value="0" /><el-option label="小（2 行）" :value="2" /><el-option label="中（4 行）" :value="4" /><el-option label="大（8 行）" :value="8" /><el-option label="超大（12 行）" :value="12" />
+                </el-select>
+              </template>
+              <el-button size="small" text type="danger" @click="deleteBlock(b)">删除</el-button>
+            </div>
+
+            <div v-if="b.block_type === 'text'">
+              <el-input type="textarea" :autosize="{ minRows: 2 }" v-model="b.content" @change="saveText(b)" />
+            </div>
+            <div v-else-if="b.block_type === 'image'" class="img-block" :style="{ textAlign: (b.style && b.style.align) || 'center' }">
+              <img :src="b.content" :style="{ width: widthCss(b) }" />
+            </div>
+            <div v-else-if="b.block_type === 'options'" class="options-block">
+              <div v-for="(opt, oi) in (b.content || [])" :key="oi" class="option-row">
+                <el-input v-model="opt.label" style="width:56px" size="small" @change="saveOptions(b)" />
+                <el-input v-model="opt.content" size="small" @change="saveOptions(b)" />
+                <el-button size="small" text type="danger" @click="removeOption(b, oi)">✖</el-button>
+              </div>
+              <el-button size="small" @click="addOption(b)">+ 选项</el-button>
+            </div>
+            <div v-else-if="b.block_type === 'answer_space'" class="space-block">答题留白 {{ (b.style && b.style.rows) || 0 }} 行</div>
+          </div>
+
+          <div class="qe-actions">
+            <el-button size="small" @click="insertTextAfter(null)">+ 文字块</el-button>
+            <el-button size="small" @click="openImagePicker">+ 图片块</el-button>
+          </div>
+        </div>
       </div>
 
       <!-- 右：预览占位（阶段三接入） -->
@@ -98,6 +161,17 @@
         <el-button type="primary" @click="saveSettings">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 插入图片 -->
+    <el-dialog v-model="showImagePicker" title="插入图片" width="420px">
+      <el-empty v-if="!assets.length" description="该练习暂无图片资产" :image-size="60" />
+      <div v-else class="asset-grid">
+        <div v-for="a in assets" :key="a" class="asset-item" @click="insertImage(a)">
+          <img :src="`/api/practices/${practiceId}/assets/${a}`" />
+          <span>{{ a.slice(0, 18) }}</span>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -106,6 +180,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { QUESTION_TYPE_MAP } from '../utils/questionTypes'
 
 const route = useRoute()
 const router = useRouter()
@@ -221,6 +296,117 @@ const saveSettings = async () => {
   await load()
 }
 
+/* ---- 块编辑区 ---- */
+const BLOCK_LABEL = { text: '文字', image: '图片', options: '选项', answer_space: '留白' }
+const WIDTH_PRESETS = [
+  { label: '适应内容', value: 'fit' },
+  { label: '50%', value: '50%' },
+  { label: '80%', value: '80%' },
+  { label: '100%', value: '100%' },
+]
+const WIDTH_PRESET_MAP = Object.fromEntries(WIDTH_PRESETS.map(w => [w.value, w.value]))
+
+const assets = ref([])
+const showImagePicker = ref(false)
+const customWidth = ref(60)
+
+const widthCss = (b) => {
+  const w = b.style && b.style.width
+  if (!w || w === 'fit') return 'auto'
+  if (typeof w === 'number') return w + '%'
+  return w
+}
+const ensureStyle = (b) => { if (!b.style) b.style = {}; return b.style }
+
+/* 块操作：响应体含 { question, blocks }，就地更新当前选中题 */
+const applyBlockResp = async (res) => {
+  const { question, blocks } = res.data
+  selected.value = question
+  selected.value.blocks = blocks
+  await load()  // 同步左树编号/已修改标记；之后把 selected 重新指向刷新后的同一题（含完整块）
+  const sec = practice.value.sections.find(s => s.questions.some(q => q.id === selected.value.id))
+  if (sec) { selectedSection.value = sec; selected.value = sec.questions.find(q => q.id === selected.value.id) }
+  normalizeBlocks()
+}
+
+const saveText = async (b) => {
+  const res = await axios.put(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks/${b.id}`, { content: b.content })
+  await applyBlockResp(res)
+}
+const saveStyle = async (b) => {
+  const res = await axios.put(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks/${b.id}`, { style: b.style })
+  await applyBlockResp(res)
+}
+const applyWidth = (b, v) => {
+  ensureStyle(b)
+  if (v !== 'custom') { b.style.width = v; saveStyle(b) }
+}
+const saveOptions = async (b) => {
+  const res = await axios.put(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks/${b.id}`, { content: b.content })
+  await applyBlockResp(res)
+}
+const addOption = (b) => {
+  const labels = 'ABCDEFGHIJKLMN'
+  b.content = b.content || []
+  b.content.push({ label: labels[b.content.length] || '?', content: '' })
+  saveOptions(b)
+}
+const removeOption = (b, oi) => { b.content.splice(oi, 1); saveOptions(b) }
+
+const moveBlock = async (b, delta) => {
+  const ids = selected.value.blocks.map(x => x.id)
+  const i = ids.indexOf(b.id)
+  const j = i + delta
+  if (i < 0 || j < 0 || j >= ids.length) return
+  ;[ids[i], ids[j]] = [ids[j], ids[i]]
+  const res = await axios.put(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks/reorder`, { block_ids: ids })
+  await applyBlockResp(res)
+}
+const deleteBlock = async (b) => {
+  await ElMessageBox.confirm('删除该块？其内容将从练习快照中移除（题库原题不受影响）。', '提示', { type: 'warning' })
+  const res = await axios.delete(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks/${b.id}`)
+  await applyBlockResp(res)
+}
+const insertTextAfter = async (b) => {
+  const res = await axios.post(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks`,
+    { block_type: 'text', content: '' })
+  await applyBlockResp(res)
+  if (b) {
+    // 移到目标块之后：重建顺序数组再调 reorder（b 来自响应前的旧引用，按 id 匹配）
+    const blocks = selected.value.blocks
+    const nb = blocks[blocks.length - 1]
+    const ids = blocks.filter(x => x.id !== nb.id).map(x => x.id)
+    ids.splice(ids.indexOf(b.id) + 1, 0, nb.id)
+    const res2 = await axios.put(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks/reorder`, { block_ids: ids })
+    await applyBlockResp(res2)
+  }
+}
+const openImagePicker = async () => {
+  const res = await axios.get(`/api/practices/${practiceId}/assets-list`)
+  assets.value = res.data.assets
+  showImagePicker.value = true
+}
+const insertImage = async (name) => {
+  const res = await axios.post(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks`,
+    { block_type: 'image', content: `asset://practice/${name}`, style: { align: 'center', width: 'fit' } })
+  await applyBlockResp(res)
+  showImagePicker.value = false
+}
+const restoreQuestion = async () => {
+  await ElMessageBox.confirm('恢复为题库原始内容？当前练习中对该题的所有修改将丢失（题库原题不受影响）。', '提示', { type: 'warning' })
+  const res = await axios.post(`/api/practices/${practiceId}/questions/${selected.value.id}/restore`)
+  await applyBlockResp(res)
+  ElMessage.success('已恢复为题库原始内容')
+}
+const updateMeta = async () => {
+  await axios.put(`/api/practices/${practiceId}/questions/${selected.value.id}`, {
+    question_type: selected.value.question_type,
+    difficulty: selected.value.difficulty ?? null,
+    score: selected.value.score ?? null,
+  })
+  await load()
+}
+
 onMounted(async () => {
   if (!practiceId) { router.push('/practices'); return }
   await load()
@@ -249,4 +435,17 @@ onMounted(async () => {
 .edit-panel { flex: 1; overflow-y: auto; padding: 16px; background: #fafafa; }
 .preview-panel { width: 260px; border-left: 1px solid #ebeef5; display: flex; align-items: center; justify-content: center; color: #c0c4cc; }
 .hint { color: #909399; font-size: 12px; margin-left: 8px; }
+.question-editor { max-width: 760px; margin: 0 auto; }
+.qe-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.flex-gap { flex: 1; }
+.qe-block { background: #fff; border: 1px solid #ebeef5; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+.block-tools { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.block-tools .el-button { padding: 0 4px; }
+.img-block img { max-height: 160px; border-radius: 4px; }
+.option-row { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
+.space-block { color: #909399; font-size: 13px; }
+.qe-actions { margin-top: 12px; }
+.asset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.asset-item { cursor: pointer; text-align: center; font-size: 12px; color: #606266; }
+.asset-item img { width: 100%; max-height: 90px; object-fit: contain; border: 1px solid #ebeef5; border-radius: 4px; }
 </style>
