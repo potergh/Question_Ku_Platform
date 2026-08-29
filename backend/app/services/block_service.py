@@ -8,12 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import Question, Source
-from app.models.practice import PracticeContentBlock, PracticeQuestion
+from app.models.practice import Practice, PracticeContentBlock, PracticeQuestion, PracticeSection
 from app.services.practice_service import (
     ASSET_RE,
+    SECTION_TYPE_ORDER,
     _copy_referenced_assets,
     practice_assets_dir,
 )
+from app.utils.question_types import map_question_type
 
 # 题型英文名 → 默认答题留白行数（决策 6：默认值由题型决定，单题可覆盖）
 DEFAULT_ANSWER_SPACE = {
@@ -132,3 +134,96 @@ async def restore_question_from_source(db: AsyncSession, pq: PracticeQuestion) -
         .options(selectinload(PracticeQuestion.blocks))
     )
     return result.scalar_one()
+
+
+# ---------------- 一键排版 ----------------
+
+async def plan_regroup(practice: Practice) -> dict:
+    """干跑整理结构：返回变化描述（规格 9.3 执行前展示变化）。"""
+    changes: list[str] = []
+    groups: dict[str, list] = {}
+    for s in sorted(practice.sections, key=lambda x: x.position):
+        for q in sorted(s.questions, key=lambda x: x.position):
+            zh = map_question_type(q.question_type)
+            groups.setdefault(zh, []).append((s, q))
+    expected = [t for t in SECTION_TYPE_ORDER if t in groups]
+    # 当前非 custom 小节序列（去重保序）
+    current: list[str] = []
+    for s in sorted(practice.sections, key=lambda x: x.position):
+        if s.section_type != "custom" and s.title not in current:
+            current.append(s.title)
+    if current != expected:
+        changes.append("题型小节将按固定顺序重排：" + "、".join(expected))
+    for zh, qs in groups.items():
+        sec_of = {s.title for s, _ in qs}
+        if len(sec_of) > 1:
+            changes.append(f"《{zh}》的题目分散在多个小节，将合并")
+        for s, q in qs:
+            if s.section_type == "custom":
+                changes.append(f"题目（编号{q.question_number}）将从自定义小节《{s.title}》移入《{zh}》")
+    return {"changes": changes, "applies": bool(changes)}
+
+
+async def apply_regroup(db: AsyncSession, practice: Practice):
+    """按题型重新分组；自定义小节整体保留并置底；题目保持全局原顺序。
+    顺序：先建新小节并迁移题目，再删旧小节，避免 delete-orphan 级联误删题目。"""
+    ordered_qs = [q for s in sorted(practice.sections, key=lambda x: x.position)
+                  for q in sorted(s.questions, key=lambda x: x.position)]
+    customs = [s for s in sorted(practice.sections, key=lambda x: x.position)
+               if s.section_type == "custom"]
+    old_sections = [s for s in practice.sections if s.section_type != "custom"]
+
+    groups: dict[str, list] = {}
+    for q in ordered_qs:
+        groups.setdefault(map_question_type(q.question_type), []).append(q)
+
+    new_sections: list[PracticeSection] = []
+    pos = 0
+    for zh in [t for t in SECTION_TYPE_ORDER if t in groups]:
+        section = PracticeSection(practice_id=practice.id, title=zh,
+                                  section_type=zh, position=pos)
+        db.add(section)
+        await db.flush()
+        await db.refresh(section, attribute_names=["questions"])  # 初始化集合，避免 append 触发懒加载
+        for q in groups[zh]:
+            # 用集合 append（而非直接赋 section_id）：确保题目先入新小节集合，
+            # 再从旧集合移除，避免中途被标记为 orphan 而级联删除
+            section.questions.append(q)
+        new_sections.append(section)
+        pos += 1
+    await db.flush()
+
+    for s in old_sections:
+        await db.delete(s)  # 此时题目已全部迁出，级联安全
+    for s in customs:
+        s.position = pos
+        pos += 1
+    await db.flush()
+    await db.commit()
+
+
+async def unify_layout(db: AsyncSession, practice: Practice) -> int:
+    """统一排版：只覆盖未定制（style_config 为空）的块样式；不动顺序。"""
+    adjusted = 0
+    qmap = {}
+    for s in practice.sections:
+        for q in s.questions:
+            qmap[q.id] = q
+    blocks = (await db.execute(
+        select(PracticeContentBlock).where(
+            PracticeContentBlock.practice_question_id.in_(list(qmap.keys())))
+    )).scalars().all()
+    for b in blocks:
+        if b.style_config:
+            continue  # 用户已定制，不覆盖（规格 9.3）
+        if b.block_type == "image":
+            b.style_config = dict(IMAGE_DEFAULT_STYLE)
+            adjusted += 1
+        elif b.block_type == "answer_space":
+            q = qmap[b.practice_question_id]
+            if q.question_type in ("single_choice", "multiple_choice"):
+                continue
+            b.style_config = {"rows": DEFAULT_ANSWER_SPACE.get(q.question_type, 4)}
+            adjusted += 1
+    await db.commit()
+    return adjusted

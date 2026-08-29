@@ -364,7 +364,7 @@ class QuestionMetaUpdateRequest(BaseModel):
 
 
 async def _renumber(db: AsyncSession, practice_id: str):
-    """按小节顺序全练习连续编号；删除已空的小节。"""
+    """按小节顺序全练习连续编号；删除已空的题型小节（空的自定义小节保留，用户可能刚新建）。"""
     sections = (await db.execute(
         select(PracticeSection)
         .where(PracticeSection.practice_id == practice_id)
@@ -375,7 +375,7 @@ async def _renumber(db: AsyncSession, practice_id: str):
     n = 0
     kept = []
     for s in sections:
-        if not s.questions:
+        if not s.questions and s.section_type != "custom":
             await db.delete(s)
             continue
         for pos, q in enumerate(sorted(s.questions, key=lambda x: x.position)):
@@ -485,3 +485,44 @@ async def update_question_meta(practice_id: str, pq_id: str, req: QuestionMetaUp
     if data:
         pq.is_modified = True  # 元数据修改也计入已修改；小节名不随之改变
     return await _practice_resp_after(db, practice_id)
+
+
+# ---------------- 一键排版 ----------------
+
+@router.post("/api/practices/{practice_id}/regroup/preview")
+async def regroup_preview(practice_id: str, db: AsyncSession = Depends(get_db)):
+    practice = await _get_practice_full(db, practice_id)
+    if not practice:
+        raise HTTPException(404, "Practice not found")
+    return await block_service.plan_regroup(practice)
+
+
+@router.post("/api/practices/{practice_id}/regroup/apply", response_model=PracticeResponse)
+async def regroup_apply(practice_id: str, db: AsyncSession = Depends(get_db)):
+    practice = await _get_practice_full(db, practice_id)
+    if not practice:
+        raise HTTPException(404, "Practice not found")
+    await block_service.apply_regroup(db, practice)
+    await _renumber(db, practice_id)
+    await db.commit()
+    practice = await _get_practice_full(db, practice_id)
+    return _practice_response(practice)
+
+
+@router.post("/api/practices/{practice_id}/layout/unify")
+async def layout_unify(practice_id: str, db: AsyncSession = Depends(get_db)):
+    practice = await _get_practice_full(db, practice_id)
+    if not practice:
+        raise HTTPException(404, "Practice not found")
+    # 先确保每题已物化块，再统一排版，否则未进过编辑器的题不会被处理
+    materialized = False
+    for s in practice.sections:
+        for pq in s.questions:
+            if not pq.blocks:
+                await block_service.materialize_blocks(db, pq)
+                materialized = True
+    if materialized:
+        await db.commit()
+        practice = await _get_practice_full(db, practice_id)
+    n = await block_service.unify_layout(db, practice)
+    return {"adjusted": n}
