@@ -1,6 +1,7 @@
 """Pydantic schemas for Practice."""
 
 from datetime import datetime
+from typing import Any
 from pydantic import BaseModel
 
 
@@ -33,6 +34,14 @@ class PracticeBrief(BaseModel):
     updated_at: datetime | None = None
 
 
+class PracticeBlockOut(BaseModel):
+    id: str
+    block_type: str
+    position: int
+    content: Any = None
+    style: dict | None = None
+
+
 class PracticeQuestionOut(BaseModel):
     id: str
     position: int
@@ -44,6 +53,7 @@ class PracticeQuestionOut(BaseModel):
     content: str | None = None
     options: list | None = None
     is_modified: bool
+    blocks: list[PracticeBlockOut] = []
 
 
 class PracticeSectionOut(BaseModel):

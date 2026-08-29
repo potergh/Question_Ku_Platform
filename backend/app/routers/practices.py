@@ -1,9 +1,13 @@
-"""Practice router — create from basket, list, detail, update, delete, assets."""
+"""Practice router — create from basket, list, detail, update, delete, assets, blocks."""
 
+import json
 import shutil
+
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -11,12 +15,13 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models import Question
 from app.models.basket import SelectionBasketItem
-from app.models.practice import Practice, PracticeQuestion, PracticeSection
+from app.models.practice import Practice, PracticeContentBlock, PracticeQuestion, PracticeSection
 from app.schemas.practice import (
     PracticeBrief, PracticeCreateRequest, PracticeListResponse,
     PracticeQuestionOut, PracticeResponse, PracticeSectionOut, PracticeUpdateRequest,
 )
 from app.services import practice_service
+from app.services import block_service
 
 router = APIRouter()
 
@@ -34,24 +39,43 @@ async def _load_questions_ordered(db: AsyncSession, qids: list[str]) -> list[Que
 async def _get_practice_full(db: AsyncSession, practice_id: str) -> Practice | None:
     result = await db.execute(
         select(Practice).where(Practice.id == practice_id)
-        .options(selectinload(Practice.sections).selectinload(PracticeSection.questions))
+        .options(selectinload(Practice.sections)
+                 .selectinload(PracticeSection.questions)
+                 .selectinload(PracticeQuestion.blocks))
+        .execution_options(populate_existing=True)  # 覆盖 identity map 中的过期缓存（如刚物化的块）
     )
     return result.scalar_one_or_none()
+
+
+def _block_out(b: PracticeContentBlock, practice_id: str) -> dict:
+    content = b.content
+    if b.block_type == "image" and content:
+        content = practice_service.resolve_practice_asset_urls(content, practice_id)
+    elif b.block_type == "options" and content:
+        try:
+            content = json.loads(content)  # 存储是 JSON 字符串，出参解析为数组供前端直接用
+        except (TypeError, ValueError):
+            content = None
+    return {"id": b.id, "block_type": b.block_type, "position": b.position,
+            "content": content, "style": b.style_config}
+
+
+def _question_out(practice_id: str, pq: PracticeQuestion) -> PracticeQuestionOut:
+    return PracticeQuestionOut(
+        id=pq.id, position=pq.position, source_question_id=pq.source_question_id,
+        question_number=pq.question_number, question_type=pq.question_type,
+        difficulty=pq.difficulty, score=pq.score,
+        content=practice_service.resolve_practice_asset_urls(pq.content_snapshot, practice_id),
+        options=pq.options_snapshot, is_modified=pq.is_modified,
+        blocks=[_block_out(b, practice_id)
+                for b in sorted(pq.blocks, key=lambda b: b.position)],
+    )
 
 
 def _practice_response(practice: Practice) -> PracticeResponse:
     sections, total = [], 0
     for s in practice.sections:
-        questions = [
-            PracticeQuestionOut(
-                id=pq.id, position=pq.position, source_question_id=pq.source_question_id,
-                question_number=pq.question_number, question_type=pq.question_type,
-                difficulty=pq.difficulty, score=pq.score,
-                content=practice_service.resolve_practice_asset_urls(pq.content_snapshot, practice.id),
-                options=pq.options_snapshot, is_modified=pq.is_modified,
-            )
-            for pq in s.questions
-        ]
+        questions = [_question_out(practice.id, pq) for pq in s.questions]
         total += len(questions)
         sections.append(PracticeSectionOut(
             id=s.id, title=s.title, section_type=s.section_type, position=s.position,
@@ -63,6 +87,34 @@ def _practice_response(practice: Practice) -> PracticeResponse:
         question_count=total, created_at=practice.created_at, updated_at=practice.updated_at,
         sections=sections,
     )
+
+
+async def _load_pq(db: AsyncSession, practice_id: str, pq_id: str) -> PracticeQuestion:
+    result = await db.execute(
+        select(PracticeQuestion)
+        .where(PracticeQuestion.id == pq_id, PracticeQuestion.practice_id == practice_id)
+        .options(selectinload(PracticeQuestion.blocks))
+        .execution_options(populate_existing=True)
+    )
+    pq = result.scalar_one_or_none()
+    if not pq:
+        raise HTTPException(404, "Practice question not found")
+    return pq
+
+
+async def _question_payload(db: AsyncSession, pq: PracticeQuestion) -> dict:
+    """块写操作统一响应：题目出参 + 块列表（直接查库取块，不依赖缓存）。"""
+    blocks = (await db.execute(
+        select(PracticeContentBlock)
+        .where(PracticeContentBlock.practice_question_id == pq.id)
+        .order_by(PracticeContentBlock.position)
+    )).scalars().all()
+    practice = await _get_practice_full(db, pq.practice_id)
+    return {
+        "question": _question_out(pq.practice_id, next(
+            pq2 for s in practice.sections for pq2 in s.questions if pq2.id == pq.id)),
+        "blocks": [_block_out(b, pq.practice_id) for b in blocks],
+    }
 
 
 @router.post("/api/practices", response_model=PracticeResponse)
@@ -152,3 +204,132 @@ async def serve_practice_asset(practice_id: str, path: str):
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(404, f"Asset not found: {path}")
     return FileResponse(str(file_path))
+
+
+# ---------------- 内容块编辑 ----------------
+
+class BlockCreateRequest(BaseModel):
+    block_type: str
+    content: Any = None
+    style: dict | None = None
+
+
+class BlockUpdateRequest(BaseModel):
+    content: Any = None
+    style: dict | None = None
+
+
+class BlockReorderRequest(BaseModel):
+    block_ids: list[str]
+
+
+@router.get("/api/practices/{practice_id}/detail", response_model=PracticeResponse)
+async def get_practice_detail(practice_id: str, db: AsyncSession = Depends(get_db)):
+    """同详情，但对未物化的题目先生成内容块（懒物化）。"""
+    practice = await _get_practice_full(db, practice_id)
+    if not practice:
+        raise HTTPException(404, "Practice not found")
+    materialized = False
+    for s in practice.sections:
+        for pq in s.questions:
+            if not pq.blocks:
+                await block_service.materialize_blocks(db, pq)
+                materialized = True
+    if materialized:
+        await db.commit()
+        practice = await _get_practice_full(db, practice_id)
+    return _practice_response(practice)
+
+
+@router.get("/api/practices/{practice_id}/assets-list")
+async def list_practice_assets(practice_id: str):
+    assets_dir = practice_service.practice_assets_dir(practice_id)
+    names = sorted(p.name for p in assets_dir.iterdir() if p.is_file())
+    return {"assets": names}
+
+
+@router.post("/api/practices/{practice_id}/questions/{pq_id}/blocks")
+async def add_block(practice_id: str, pq_id: str, req: BlockCreateRequest,
+                    db: AsyncSession = Depends(get_db)):
+    pq = await _load_pq(db, practice_id, pq_id)
+    if req.block_type not in ("text", "image", "options", "answer_space"):
+        raise HTTPException(400, f"不支持的块类型: {req.block_type}")
+    content = req.content
+    if req.block_type == "options" and not isinstance(content, str):
+        content = json.dumps(content or [], ensure_ascii=False)  # 入参数组 → JSON 字符串落库
+    existing = (await db.execute(
+        select(func.max(PracticeContentBlock.position))
+        .where(PracticeContentBlock.practice_question_id == pq.id)
+    )).scalar()
+    block = PracticeContentBlock(
+        practice_question_id=pq.id, block_type=req.block_type,
+        position=(existing + 1) if existing is not None else 0,
+        content=content, style_config=req.style)
+    db.add(block)
+    await db.flush()
+    await block_service.rebuild_content_from_blocks(db, pq)
+    await db.commit()
+    return await _question_payload(db, pq)
+
+
+@router.put("/api/practices/{practice_id}/questions/{pq_id}/blocks/reorder")
+async def reorder_blocks(practice_id: str, pq_id: str, req: BlockReorderRequest,
+                         db: AsyncSession = Depends(get_db)):
+    pq = await _load_pq(db, practice_id, pq_id)
+    bmap = {b.id: b for b in pq.blocks}
+    for pos, bid in enumerate(req.block_ids):
+        if bid in bmap:
+            bmap[bid].position = pos
+    await block_service.rebuild_content_from_blocks(db, pq)
+    await db.commit()
+    return await _question_payload(db, pq)
+
+
+@router.put("/api/practices/{practice_id}/questions/{pq_id}/blocks/{block_id}")
+async def update_block(practice_id: str, pq_id: str, block_id: str,
+                       req: BlockUpdateRequest, db: AsyncSession = Depends(get_db)):
+    pq = await _load_pq(db, practice_id, pq_id)
+    block = next((b for b in pq.blocks if b.id == block_id), None)
+    if not block:
+        raise HTTPException(404, "Block not found")
+    data = req.model_dump(exclude_unset=True)
+    if "content" in data:
+        content = data["content"]
+        if block.block_type == "options" and not isinstance(content, str):
+            content = json.dumps(content or [], ensure_ascii=False)
+        block.content = content
+    if "style" in data:
+        block.style_config = data["style"]
+    await block_service.rebuild_content_from_blocks(db, pq)
+    await db.commit()
+    return await _question_payload(db, pq)
+
+
+@router.delete("/api/practices/{practice_id}/questions/{pq_id}/blocks/{block_id}")
+async def delete_block(practice_id: str, pq_id: str, block_id: str,
+                       db: AsyncSession = Depends(get_db)):
+    pq = await _load_pq(db, practice_id, pq_id)
+    block = next((b for b in pq.blocks if b.id == block_id), None)
+    if not block:
+        raise HTTPException(404, "Block not found")
+    await db.delete(block)
+    await db.flush()
+    remaining = (await db.execute(
+        select(PracticeContentBlock)
+        .where(PracticeContentBlock.practice_question_id == pq.id)
+        .order_by(PracticeContentBlock.position)
+    )).scalars().all()
+    for pos, b in enumerate(remaining):
+        b.position = pos
+    await block_service.rebuild_content_from_blocks(db, pq)
+    await db.commit()
+    return await _question_payload(db, pq)
+
+
+@router.post("/api/practices/{practice_id}/questions/{pq_id}/restore")
+async def restore_question(practice_id: str, pq_id: str, db: AsyncSession = Depends(get_db)):
+    pq = await _load_pq(db, practice_id, pq_id)
+    restored = await block_service.restore_question_from_source(db, pq)
+    if not restored:
+        raise HTTPException(404, "题库原题不存在或已删除，无法恢复")
+    return await _question_payload(db, restored)
