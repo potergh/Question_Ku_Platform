@@ -21,7 +21,10 @@
       <div class="tree-panel">
         <div class="panel-head">
           <span>练习结构</span>
-          <el-button size="small" text type="primary" @click="addSection">+ 小节</el-button>
+          <span>
+            <el-button size="small" text type="primary" @click="openAddQuestions">+ 添加题目</el-button>
+            <el-button size="small" text type="primary" @click="addSection">+ 小节</el-button>
+          </span>
         </div>
         <div v-for="s in practice?.sections || []" :key="s.id" class="tree-section">
           <div class="section-row">
@@ -154,6 +157,41 @@
       </template>
     </el-dialog>
 
+    <!-- 从题库添加题目 -->
+    <el-dialog v-model="addQ.show" title="从题库添加题目" width="720px" top="6vh">
+      <div class="addq-filter">
+        <el-input v-model="addQ.search" placeholder="搜索题目内容…" clearable style="width:260px"
+                  @keyup.enter="loadAddQList" @clear="loadAddQList" />
+        <el-select v-model="addQ.type" placeholder="题型" clearable style="width:120px" @change="loadAddQList">
+          <el-option v-for="t in ['选择题','多选题','填空题','实验题','计算题','解答题','简答题']" :key="t" :label="t" :value="t" />
+        </el-select>
+        <el-button :loading="addQ.loading" @click="loadAddQList">搜索</el-button>
+      </div>
+      <el-table :data="addQ.list" v-loading="addQ.loading" height="380" size="small"
+                @selection-change="rows => addQ.selected = rows">
+        <el-table-column type="selection" width="42" :selectable="row => !addQ.existing.has(row.id)" />
+        <el-table-column label="题目" min-width="380">
+          <template #default="{ row }"><div class="addq-content">{{ addQText(row.content) }}</div></template>
+        </el-table-column>
+        <el-table-column label="题型" width="90">
+          <template #default="{ row }">
+            <el-tag size="small">{{ QUESTION_TYPE_MAP[row.question_type] || row.question_type }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="70">
+          <template #default="{ row }">
+            <el-tag v-if="addQ.existing.has(row.id)" size="small" type="success">已添加</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="addQ.show = false">取消</el-button>
+        <el-button type="primary" :disabled="!addQ.selected.length" :loading="addQ.adding" @click="addSelectedQuestions">
+          添加所选 {{ addQ.selected.length }} 题
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- 移动到小节 -->
     <el-dialog v-model="showMove" title="移动到小节" width="380px">
       <el-select v-model="moveTarget" placeholder="选择目标小节" style="width:100%">
@@ -248,6 +286,39 @@ const normalizeBlocks = () => {  // 旧块可能无 style，前端统一补空�
   for (const b of (selected.value?.blocks || [])) { if (!b.style) b.style = {} }
 }
 const refresh = async () => { await load(); selected.value = null }
+
+// 从题库继续添加题目到已有练习（重复题不可再选，后端也会去重）
+const addQ = reactive({ show: false, search: '', type: '', loading: false, adding: false,
+  list: [], selected: [], existing: new Set() })
+const openAddQuestions = async () => {
+  addQ.existing = new Set(
+    (practice.value?.sections || []).flatMap(s => s.questions.map(q => q.source_question_id)))
+  addQ.selected = []
+  addQ.show = true
+  await loadAddQList()
+}
+const loadAddQList = async () => {
+  addQ.loading = true
+  try {
+    const res = await axios.get('/api/questions', { params: {
+      search: addQ.search || undefined, question_type: addQ.type || undefined, page_size: 100 } })
+    addQ.list = res.data.questions
+  } finally { addQ.loading = false }
+}
+const addQText = (c) => (c || '').replace(/!\[[^\]]*\]\([^)]*\)/g, '[图]').slice(0, 80)
+const addSelectedQuestions = async () => {
+  addQ.adding = true
+  try {
+    const res = await axios.post(`/api/practices/${practiceId}/questions/add`,
+      { question_ids: addQ.selected.map(r => r.id) })
+    practice.value = res.data
+    addQ.show = false
+    schedulePreview()
+    ElMessage.success(`已添加 ${addQ.selected.length} 题`)
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '添加失败')
+  } finally { addQ.adding = false }
+}
 
 /* ---- 小节管理 ---- */
 const addSection = async () => {
@@ -558,6 +629,8 @@ onMounted(async () => {
 .tree-question:hover .q-ops { display: inline-flex; }
 .edit-panel { flex: 1; overflow-y: auto; padding: 16px; background: #fafafa; }
 .pv-resizer { width: 5px; cursor: col-resize; background: #ebeef5; flex-shrink: 0; transition: background .15s; }
+.addq-filter { display: flex; gap: 8px; margin-bottom: 10px; }
+.addq-content { font-size: 12px; line-height: 1.5; white-space: normal; color: #303133; }
 .pv-resizer:hover { background: #c0c4cc; }
 .preview-panel { flex-shrink: 0; border-left: 1px solid #ebeef5; display: flex; flex-direction: column; background: #f0f2f5; }
 .pv-toolbar { display: flex; align-items: center; gap: 2px; padding: 6px 8px; border-bottom: 1px solid #ebeef5; background: #fff; }

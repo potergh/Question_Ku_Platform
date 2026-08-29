@@ -386,6 +386,28 @@ class QuestionMetaUpdateRequest(BaseModel):
     score: float | None = None
 
 
+class AddQuestionsRequest(BaseModel):
+    question_ids: list[str]
+
+
+@router.post("/api/practices/{practice_id}/questions/add", response_model=PracticeResponse)
+async def add_questions_from_library(practice_id: str, req: AddQuestionsRequest,
+                                     db: AsyncSession = Depends(get_db)):
+    """已有练习继续从题库添加题目：按题型归入小节，重复跳过，连续重编号。"""
+    practice = await _get_practice_full(db, practice_id)
+    if not practice:
+        raise HTTPException(404, "Practice not found")
+    questions = await _load_questions_ordered(db, req.question_ids)
+    if not questions:
+        raise HTTPException(400, "没有可用题目：题目不存在或已删除")
+    added = await practice_service.add_questions_to_practice(db, practice, questions)
+    if not added:
+        raise HTTPException(400, "所选题目均已在练习内")
+    await db.flush()
+    await _renumber(db, practice_id)
+    return await _practice_resp_after(db, practice_id)
+
+
 async def _renumber(db: AsyncSession, practice_id: str):
     """按小节顺序全练习连续编号；删除已空的题型小节（空的自定义小节保留，用户可能刚新建）。"""
     sections = (await db.execute(

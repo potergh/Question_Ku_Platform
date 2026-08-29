@@ -8,8 +8,8 @@ from pathlib import Path
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
-from docx.oxml.ns import qn
-from docx.oxml import OxmlElement
+from docx.oxml.ns import qn, nsdecls
+from docx.oxml import OxmlElement, parse_xml
 from docx.shared import Cm, Pt
 
 from app.services import practice_service
@@ -26,6 +26,10 @@ def build_docx(practice, practice_id: str) -> bytes:
     content_width = A4_W - 2 * margin
 
     doc = Document()
+    # 英文用 Times New Roman、中文用宋体：设在 Normal 样式上全文生效（公式另有数学字体）
+    normal = doc.styles["Normal"]
+    normal.font.name = "Times New Roman"
+    normal._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
     sec = doc.sections[0]
     sec.page_width, sec.page_height = A4_W, A4_H
     sec.top_margin = sec.bottom_margin = sec.left_margin = sec.right_margin = margin
@@ -70,7 +74,8 @@ def build_docx(practice, practice_id: str) -> bytes:
 
 
 def _set_cn_font(run, name="宋体"):
-    run.font.name = name
+    """中文用指定字体，西文统一 Times New Roman。"""
+    run.font.name = "Times New Roman"
     run._element.rPr.rFonts.set(qn("w:eastAsia"), name)
 
 
@@ -116,10 +121,10 @@ def _add_question(doc, pq, assets: Path, content_width, s: dict):
         flush_imgs()
         style = b.style_config or {}
         if b.block_type == "text":
-            # LaTeX 原样保留：Word 可继续编辑（规格 10.2），仅去除 Markdown 加粗标记
             tp = doc.add_paragraph()
-            tp.add_run(("" if prefix_used else prefix)
-                       + (b.content or "").replace("**", ""))
+            # 公式内嵌为 OMML 数学对象（转换失败则保留 LaTeX 原文，Word 可继续编辑）
+            _add_rich_runs(tp, ("" if prefix_used else prefix)
+                           + (b.content or "").replace("**", ""), assets)
             prefix_used = True
         elif b.block_type == "options":
             try:
@@ -138,8 +143,54 @@ def _add_question(doc, pq, assets: Path, content_width, s: dict):
     flush_imgs()
 
 
+# 公式段：$$…$$ / \[…\] 为行间，$…$ / \(…\) 为行内（先长后短，正则分支顺序即优先级）
+_MATH_RE = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)|\$([^\$\n]+?)\$", re.S)
+
+
+def _split_math(content: str):
+    """内容切分为文字/公式段，返回 (是否公式, 文本, 是否行间)。"""
+    segs, last = [], 0
+    for m in _MATH_RE.finditer(content):
+        if m.start() > last:
+            segs.append((False, content[last:m.start()], False))
+        if m.group(1) is not None or m.group(2) is not None:
+            segs.append((True, m.group(1) or m.group(2), True))
+        else:
+            segs.append((True, m.group(3) or m.group(4), False))
+        last = m.end()
+    if last < len(content):
+        segs.append((False, content[last:], False))
+    return segs
+
+
+def _latex_to_omml(tex: str, display: bool):
+    """LaTeX → OMML 元素（Word 原生公式）；转换失败返回 None，调用方退回原文。"""
+    try:
+        import latex2mathml.converter
+        import mathml2omml
+        omml = mathml2omml.convert(latex2mathml.converter.convert(tex.strip()))
+    except Exception:
+        return None
+    if display:
+        omml = f"<m:oMathPara>{omml}</m:oMathPara>"
+    return parse_xml(f'<root {nsdecls("m")}>{omml}</root>')[0]
+
+
 def _add_rich_runs(paragraph, content: str, assets: Path):
-    """选项文字中的图片引用 → 行内图片（随文字基线排版）。"""
+    """混合富内容：公式 → 内嵌 OMML，图片引用 → 行内图片，其余纯文字。"""
+    for is_math, text, display in _split_math(content or ""):
+        if is_math:
+            el = _latex_to_omml(text, display)
+            if el is not None:
+                paragraph._p.append(el)
+            else:
+                paragraph.add_run(text)   # 转换失败：保留 LaTeX，Word 可继续编辑（规格 10.2 兑底）
+            continue
+        _add_text_with_imgs(paragraph, text, assets)
+
+
+def _add_text_with_imgs(paragraph, content: str, assets: Path):
+    """文字中的图片引用 → 行内图片（随文字基线排版）。"""
     last = 0
     for m in re.finditer(r"!\[[^\]]*\]\((asset://[^\s\)]+)\)|(asset://[^\s\)]+)", content or ""):
         if m.start() > last:

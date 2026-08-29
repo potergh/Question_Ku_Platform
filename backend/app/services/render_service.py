@@ -175,8 +175,8 @@ def _blocks_html(blocks, practice_id: str, prefix: str) -> str:
 def _head_css() -> str:
     return ('<!DOCTYPE html><html><head><meta charset="utf-8">'
             '<style>'
-            'body { font-family: "SimSun", "Microsoft YaHei", serif; font-size: 10.5pt;'
-            ' line-height: 1.7; color: #000; margin: 0; }'
+            'body { font-family: "Times New Roman", "SimSun", "Microsoft YaHei", serif; font-size: 10.5pt;'
+            ' line-height: 1.7; color: #000; margin: 0; }'   # 西文 TNR，中文回落宋体
             '.p-title { text-align: center; font-size: 18pt; font-weight: bold; margin-bottom: 4px; }'
             '.p-subtitle { text-align: center; font-size: 12pt; color: #333; margin-bottom: 8px; }'
             '.p-total { text-align: center; font-size: 10.5pt; margin-bottom: 6px; }'

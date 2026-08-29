@@ -6,7 +6,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -231,3 +231,34 @@ async def create_practice_from_questions(
         .options(selectinload(Practice.sections).selectinload(PracticeSection.questions))
     )
     return result.scalar_one()
+
+
+async def add_questions_to_practice(
+    db: AsyncSession, practice: Practice, questions: list,
+) -> int:
+    """已有练习继续从题库添加：按题型归入对应小节（缺则新建），已在练习内的跳过。返回实际添加数。"""
+    existing = {pq.source_question_id for s in practice.sections for pq in s.questions}
+    added = 0
+    for q in questions:
+        if q.id in existing:
+            continue
+        zh_type = map_question_type(q.question_type)
+        section = next((s for s in practice.sections if s.section_type == zh_type), None)
+        if section is None:
+            section = PracticeSection(
+                practice_id=practice.id, title=zh_type, section_type=zh_type,
+                position=max((s.position for s in practice.sections), default=-1) + 1,
+            )
+            db.add(section)
+            await db.flush()
+            practice.sections.append(section)
+        # 新建小节的 questions 关系未预加载，显式查库取末尾位置（避免异步懒加载）
+        max_pos = (await db.execute(
+            select(func.max(PracticeQuestion.position))
+            .where(PracticeQuestion.section_id == section.id)
+        )).scalar()
+        position = (max_pos if max_pos is not None else -1) + 1
+        await snapshot_question(db, practice, section, q, position)
+        existing.add(q.id)
+        added += 1
+    return added

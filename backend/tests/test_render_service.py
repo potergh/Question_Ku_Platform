@@ -132,6 +132,27 @@ async def test_option_images_migrate_and_render(client, test_db, tmp_path):
     assert "![figure]" not in "".join(para.text for para in doc.paragraphs)
 
 
+async def test_docx_math_omml_and_fonts(client, test_db, tmp_path):
+    """Word 公式内嵌为 OMML 数学对象（行内 + 行间）；英文字体 Times New Roman、中文宋体。"""
+    from docx.oxml.ns import qn
+    practice = await _create_practice(client, test_db, tmp_path,
+                                      content="直角三角形中满足 $a^2+b^2=c^2$，求 $c$。$$E=mc^2$$")
+    pid = practice["id"]
+    await client.get(f"/api/practices/{pid}/detail")
+    p = await _load_with_blocks(test_db, pid)
+    doc = Document(io.BytesIO(docx_export.build_docx(p, pid)))
+    xml = doc.element.xml
+    assert "oMath" in xml                        # 公式内嵌为 OMML 对象
+    assert "oMathPara" in xml                    # $$…$$ 为行间公式
+    assert "$a^2+b^2=c^2$" not in xml            # 不残留原始 LaTeX 文本
+    # 字体：西文 Times New Roman，中文宋体
+    normal = doc.styles["Normal"]
+    assert normal.font.name == "Times New Roman"
+    assert normal._element.rPr.rFonts.get(qn("w:eastAsia")) == "宋体"
+    # 预览 HTML 同样西文优先 TNR
+    assert '"Times New Roman"' in build_practice_html(p, pid)
+
+
 async def test_fit_width_capped(client, test_db, tmp_path):
     """fit 默认上限：宽图不超内容区 50%（800px@96dpi≈20cm → 封顶 8cm）。"""
     from PIL import Image

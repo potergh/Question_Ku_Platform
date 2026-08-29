@@ -1,5 +1,7 @@
 """API tests for practice structure editing."""
 
+from sqlalchemy import select
+
 from app.models import Source, Question
 
 from test_blocks_api import _create_practice  # noqa: F401  供其他测试模块复用
@@ -42,6 +44,46 @@ async def test_add_and_delete_section(client, test_db, tmp_path):
     busy = res.json()["sections"][0]
     res = await client.delete(f"/api/practices/{pid}/sections/{busy['id']}")
     assert res.status_code == 400
+
+
+async def test_add_questions_from_library(client, test_db, tmp_path):
+    """已有练习继续从题库添加：按题型归入小节（缺则新建），已在练习内的跳过，全练习连续编号。"""
+    practice = await _two_questions(client, test_db, tmp_path)
+    pid = practice["id"]
+    dup_id = practice["sections"][0]["questions"][0]["source_question_id"]   # 已在练习内，应跳过
+    async with test_db() as db:
+        source = (await db.execute(select(Source))).scalars().first()
+        q3 = Question(source_id=source.id, source_question_id="Q3", question_number=7,
+                      question_type="calculation", content="计算题题干")
+        db.add(q3)
+        await db.commit()
+        await db.refresh(q3)
+        q3_id = q3.id
+
+    res = await client.post(f"/api/practices/{pid}/questions/add",
+                            json={"question_ids": [q3_id, dup_id]})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["question_count"] == 3   # 重复题未重复加入
+    nums = [q["question_number"] for s in data["sections"] for q in s["questions"]]
+    assert nums == [1, 2, 3]   # 来源编号 7 重排为连续 3
+    calc = next(s for s in data["sections"] if s["title"] == "计算题")
+    assert len(calc["questions"]) == 1
+
+    # 再添加同类型题目 → 归入已有计算题小节末尾，不新建重复小节
+    async with test_db() as db:
+        source = (await db.execute(select(Source))).scalars().first()
+        q4 = Question(source_id=source.id, source_question_id="Q4", question_number=8,
+                      question_type="calculation", content="计算题题干二")
+        db.add(q4)
+        await db.commit()
+        await db.refresh(q4)
+        q4_id = q4.id
+    res = await client.post(f"/api/practices/{pid}/questions/add", json={"question_ids": [q4_id]})
+    data = res.json()
+    assert data["question_count"] == 4
+    calc_secs = [s for s in data["sections"] if s["title"] == "计算题"]
+    assert len(calc_secs) == 1 and len(calc_secs[0]["questions"]) == 2
 
 
 async def test_move_question_and_renumber(client, test_db, tmp_path):
