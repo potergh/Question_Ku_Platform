@@ -462,7 +462,7 @@ const removeCurrentOption = async () => {
 .qre-canvas :deep(.qre-option[data-selected]) { background: #ecf5ff; }
 .qre-canvas :deep(.qre-option-label) { color: #303133; font-weight: 600; flex-shrink: 0; }
 .qre-canvas :deep(.qre-img) { position: relative; padding: 4px; margin: 6px 0; }
-.qre-canvas :deep(.qre-img[data-layout="row"]) { display: inline-block; vertical-align: top; margin: 4px 2px; }
+.qre-canvas :deep(.qre-img[data-layout="row"]) { display: inline-block; vertical-align: top; margin: 4px 0; padding: 0 3px; box-sizing: border-box; }
 .qre-canvas :deep(.qre-img[data-layout="row"] .qre-img-wrap) { width: 100%; }
 .qre-canvas :deep(.qre-img[data-layout="row"] img) { width: 100%; }
 .qre-canvas :deep(.qre-img.is-center) { text-align: center; }

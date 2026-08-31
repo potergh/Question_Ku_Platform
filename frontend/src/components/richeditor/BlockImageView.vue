@@ -1,6 +1,6 @@
 <!-- 块级图片节点视图：渲染 + 工具条 + 拖拽缩放控制点 + 排版切换（阶段 4） -->
 <template>
-  <node-view-wrapper as="div" class="qre-img" :class="alignCls"
+  <node-view-wrapper as="div" class="qre-img" :class="alignCls" :style="nodeViewStyle"
     :data-layout="node.attrs.layout || 'row'"
     :data-selected="selected || undefined">
     <div class="qre-img-wrap">
@@ -144,14 +144,21 @@ const alignCls = computed(() => ({
   'is-center': (props.node.attrs.align || 'center') === 'center',
   'is-right': props.node.attrs.align === 'right',
 }))
+const nodeViewStyle = computed(() => {
+  // 并排(row)时：节点视图占容器宽度的 1/N，多个 inline-block 节点视图横向排布
+  const layout = props.node.attrs.layout || 'row'
+  const inRow = layout === 'row' && rowImageCount.value > 1
+  if (!inRow) return {}
+  return { width: (100 / rowImageCount.value).toFixed(2) + '%' }
+})
+
 const imgStyle = computed(() => {
   const layout = props.node.attrs.layout || 'row'
   const inRow = layout === 'row' && rowImageCount.value > 1
   const w = props.node.attrs.width
   if (inRow) {
-    // 并排：等宽分配容器，图片填满自身 wrapper
-    const pct = (100 / rowImageCount.value).toFixed(2)
-    return { width: pct + '%', maxWidth: 'none', maxHeight: 'none' }
+    // 并排：图片填满等宽 wrapper（等宽百分比由 wrapStyle 计算）
+    return { width: '100%', height: 'auto', maxWidth: 'none', maxHeight: 'none' }
   }
   if (!w || w === 'fit') return { width: 'auto', maxWidth: '50%', maxHeight: '8cm' }
   if (typeof w === 'number') return { width: w + '%', maxWidth: 'none', maxHeight: 'none' }

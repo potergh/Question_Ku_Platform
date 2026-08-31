@@ -39,3 +39,6 @@ htmlcov/
 backend/*.docx
 re_export.docx
 verify_export.docx
+
+backend/_uvicorn.log
+backend/_uvicorn_err.log
