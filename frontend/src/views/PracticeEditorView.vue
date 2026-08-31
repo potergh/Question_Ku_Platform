@@ -144,7 +144,7 @@
         <el-input v-model="addQ.search" placeholder="搜索题目内容…" clearable style="width:230px"
                   @keyup.enter="loadAddQList" @clear="loadAddQList" />
         <el-select v-model="addQ.subject" placeholder="学科" clearable style="width:96px" @change="loadAddQList">
-          <el-option v-for="t in ['物理','化学','数学','英语','语文','生物','地理','历史','政治']" :key="t" :label="t" :value="t" />
+          <el-option v-for="t in SUBJECT_OPTIONS" :key="t.value" :label="t.label" :value="t.value" />
         </el-select>
         <el-select v-model="addQ.grade" placeholder="年级" clearable style="width:96px" @change="loadAddQList">
           <el-option v-for="g in ['初一','初二','初三','中考','高一','高二','高三']" :key="g" :label="g" :value="g" />
@@ -405,6 +405,14 @@ const selectQuestion = async (s, q) => {
 const refresh = async () => { await load(); selected.value = null }
 
 // 从题库继续添加题目到已有练习（重复题不可再选，后端也会去重）
+// 学科取值与题库一致（英文 code），展示统一中文
+const SUBJECT_OPTIONS = [
+  { value: 'physics', label: '物理' },
+  { value: 'math', label: '数学' },
+  { value: 'chemistry', label: '化学' },
+  { value: 'english', label: '英语' },
+]
+
 const addQ = reactive({ show: false, search: '', type: '', subject: '', grade: '',
   difficulty: undefined, has_explanation: undefined, source_id: '', tag_id: '',
   loading: false, adding: false, list: [], selected: [], existing: new Set(), sources: [], tags: [] })
