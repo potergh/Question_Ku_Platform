@@ -215,6 +215,9 @@ def _head_css(default_style: dict | None = None) -> str:
             '.opt-label { margin-right: 4px; }'
             '.q-score { font-size: 9pt; }'
             '.answer-space { margin: 4px 0; }'
+            # 阶段 3 补齐：独立公式跨页保护（公式整体不被拆到两页）+ 长公式不溢出容器
+            '.q-formula { page-break-inside: avoid; break-inside: avoid; }'
+            '.katex-display { page-break-inside: avoid; break-inside: avoid; }'
             'u { white-space: pre-wrap; }'   # 下划线填空位常为纯空格：防空白折叠导致下划线不可见
             '.q-hr { border: none; border-top: 1px solid #000; margin: 6px 0; }'   # 横线（填写线/分隔线）
             '.q-list { margin: 2px 0 2px 2em; padding: 0; }'
@@ -231,6 +234,23 @@ def _katex_tags() -> str:
             'renderMathInElement(document.body, {delimiters:['
             '{left:"$$",right:"$$",display:true},{left:"\\\\[",right:"\\\\]",display:true},'
             '{left:"$",right:"$",display:false},{left:"\\\\(",right:"\\\\)",display:false}]});'
+            # 阶段 3 补齐：长公式溢出检测——超出内容宽度的显示公式按比例缩放（zoom 影响布局），并记录统计
+            'window.__katexLayout = {overflow:0, scaled:0, unhandled:0};'
+            'document.querySelectorAll(".katex-display").forEach(function(el){'
+            'var host = el.closest(".q-formula") || el.parentElement;'
+            'if (!host) return;'
+            'var katex = el.querySelector(".katex");'
+            'if (!katex) return;'
+            'var avail = host.clientWidth || host.parentElement.clientWidth || document.body.clientWidth;'
+            'var w = katex.scrollWidth || katex.getBoundingClientRect().width;'
+            'if (w > avail) {'
+            '  window.__katexLayout.overflow++;'
+            '  var scale = avail / w;'
+            '  el.style.zoom = scale.toFixed(4);'
+            '  window.__katexLayout.scaled++;'
+            '  if (scale < 0.5) window.__katexLayout.unhandled++;'
+            '}'
+            '});'
             'window.__katexDone = true;});</script>')
 
 
@@ -281,3 +301,25 @@ async def ensure_preview_pdf(practice_id: str, html: str, settings: dict) -> tup
     pages = pdf_page_count(pdf_path)
     meta_path.write_text(json.dumps({"sha": sha, "pages": pages}), encoding="utf-8")
     return pdf_path, sha, pages
+
+async def render_layout_probe(html: str, settings: dict) -> dict:
+    """渲染 HTML 并返回长公式溢出/自动缩放统计（阶段 3 专项测试用，不落盘）。
+    返回形如 {"overflow": n, "scaled": n, "unhandled": n}；溢出长公式已被 zoom 缩放适配。"""
+    return await asyncio.to_thread(_render_layout_probe_sync, html, settings)
+
+
+def _render_layout_probe_sync(html: str, settings: dict) -> dict:
+    from playwright.sync_api import sync_playwright
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "practice.html").write_text(html, encoding="utf-8")
+        shutil.copytree(katex_dist_dir(), root / "katex")
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            try:
+                page = browser.new_page()
+                page.goto((root / "practice.html").as_uri(), wait_until="load")
+                page.wait_for_function("window.__katexLayout !== undefined", timeout=15000)
+                return page.evaluate("window.__katexLayout")
+            finally:
+                browser.close()

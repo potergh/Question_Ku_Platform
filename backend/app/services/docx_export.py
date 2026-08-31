@@ -492,16 +492,18 @@ def _split_math(content: str):
 
 
 def _latex_to_omml(tex: str, display: bool):
-    """LaTeX → OMML 元素（Word 原生公式）；转换失败返回 None，调用方退回原文。"""
+    """LaTeX → OMML 元素（Word 原生公式）；转换失败返回 None，调用方退回原文。
+    注：mathml2omml 对个别命令（如 \\vec）会产出标签不闭合的坏 OMML，
+    parse_xml 一并纳入 try——坏 OMML 按转换失败处理，走图片降级，避免污染整个 docx。"""
     try:
         import latex2mathml.converter
         import mathml2omml
         omml = mathml2omml.convert(latex2mathml.converter.convert(tex.strip()))
+        if display:
+            omml = f"<m:oMathPara>{omml}</m:oMathPara>"
+        return parse_xml(f'<root {nsdecls("m")}>{omml}</root>')[0]
     except Exception:
         return None
-    if display:
-        omml = f"<m:oMathPara>{omml}</m:oMathPara>"
-    return parse_xml(f'<root {nsdecls("m")}>{omml}</root>')[0]
 
 
 def _add_rich_runs(paragraph, content: str, assets: Path, fb=None, default_size: float = 11):
