@@ -6,11 +6,16 @@
         <b>{{ practice?.title || '加载中…' }}</b>
         <el-tag v-if="practice?.grade" size="small">{{ practice.grade }}</el-tag>
         <span class="qcount">{{ practice?.question_count || 0 }} 题</span>
+        <el-radio-group v-model="mode" size="small" style="margin-left:8px" @change="onModeChange">
+          <el-radio-button label="single">单题编辑</el-radio-button>
+          <el-radio-button label="workbook">整册编排</el-radio-button>
+        </el-radio-group>
       </div>
       <div>
+        <el-button v-if="mode === 'workbook'" type="primary" @click="saveLayout(true)" :loading="layoutSaving">保存整册</el-button>
         <el-button @click="openSettings"><el-icon><Setting /></el-icon> 练习设置</el-button>
-        <el-button @click="previewRegroup"><el-icon><Sort /></el-icon> 整理结构</el-button>
-        <el-button @click="unifyLayout"><el-icon><MagicStick /></el-icon> 统一排版</el-button>
+        <el-button v-if="mode === 'single'" @click="previewRegroup"><el-icon><Sort /></el-icon> 整理结构</el-button>
+        <el-button v-if="mode === 'single'" @click="unifyLayout"><el-icon><MagicStick /></el-icon> 统一排版</el-button>
         <el-button @click="exportFile('pdf')"><el-icon><Document /></el-icon> 导出 PDF</el-button>
         <el-button @click="exportFile('docx')"><el-icon><Tickets /></el-icon> 导出 Word</el-button>
       </div>
@@ -21,7 +26,7 @@
       <div class="tree-panel">
         <div class="panel-head">
           <span>练习结构</span>
-          <span>
+          <span v-if="mode === 'single'">
             <el-button size="small" text type="primary" @click="openAddQuestions">+ 添加题目</el-button>
             <el-button size="small" text type="primary" @click="addSection">+ 小节</el-button>
           </span>
@@ -30,7 +35,7 @@
           <div class="section-row">
             <b>{{ s.title }}</b>
             <el-tag v-if="s.section_type === 'custom'" size="small">自定义</el-tag>
-            <span class="row-ops">
+            <span class="row-ops" v-if="mode === 'single'">
               <el-tooltip content="显示/隐藏标题"><el-switch v-model="s.show_title" size="small" @change="patchSection(s, { show_title: $event })" /></el-tooltip>
               <el-tooltip content="从新页开始"><el-switch v-model="s.start_on_new_page" size="small" @change="patchSection(s, { start_on_new_page: $event })" /></el-tooltip>
               <el-button size="small" text @click="renameSection(s)">✏</el-button>
@@ -39,12 +44,12 @@
           </div>
           <div v-for="q in s.questions" :key="q.id"
                class="tree-question" :class="{ active: selected?.id === q.id }"
-               @click="selectQuestion(s, q)">
+               @click="onTreeQuestionClick(s, q)">
             <span class="q-label">{{ q.question_number }}.
               <el-tag v-if="q.is_modified" size="small" type="warning">改</el-tag>
             </span>
             <span class="q-preview">{{ treePreview(q.content) }}</span>
-            <span class="q-ops" @click.stop>
+            <span class="q-ops" v-if="mode === 'single'" @click.stop>
               <el-button size="small" text @click="moveUp(s, q)">↑</el-button>
               <el-button size="small" text @click="moveDown(s, q)">↓</el-button>
               <el-button size="small" text @click="openMove(q)">⇄</el-button>
@@ -55,8 +60,21 @@
         <el-empty v-if="!practice?.sections?.length" description="暂无题目" :image-size="60" />
       </div>
 
-      <!-- 中：单题所见即所得编辑区（阶段 1） -->
+      <!-- 中：整册编排画布 / 单题所见即所得编辑区 -->
       <div class="edit-panel">
+        <WorkbookCanvas v-if="mode === 'workbook'"
+          ref="wbCanvasRef"
+          :practice-id="practiceId"
+          :sections="practice?.sections || []"
+          :layout="layout"
+          :title="practice?.title || ''"
+          @change="onLayoutChange"
+          @open-question="openQuestionFromWorkbook"
+          @insert-question="insertQuestionFromWorkbook"
+          @remove-question="removeQuestionFromWorkbook"
+          @update:title="onWorkbookTitleChange"
+          @pick-image="pickImageForCustom" />
+        <template v-else>
         <el-empty v-if="!selected" description="从左侧选择一道题开始编辑" />
         <div v-else class="question-editor">
           <div class="qe-header">
@@ -85,6 +103,7 @@
             @saved="onDocSaved"
             @request-replace-image="openReplacePicker" />
         </div>
+        </template>
       </div>
 
       <!-- 右：A4 预览（后端渲染，与 PDF 同源），分隔条可拖拽调宽 -->
@@ -239,6 +258,7 @@ import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { QUESTION_TYPE_MAP } from '../utils/questionTypes'
 import QuestionRichEditor from '../components/richeditor/QuestionRichEditor.vue'
+import WorkbookCanvas from '../components/WorkbookCanvas.vue'
 import { FONT_NAMES, FONT_SIZES, LINE_HEIGHTS, DEFAULT_STYLE } from '../components/richeditor/typography'
 
 const route = useRoute()
@@ -248,6 +268,102 @@ const practiceId = route.query.id
 const practice = ref(null)
 const selected = ref(null)
 const selectedSection = ref(null)
+
+/* ---- 阶段 5：整册编排 ---- */
+const mode = ref('single')
+const layout = ref([])
+const layoutDirty = ref(false)
+const layoutSaving = ref(false)
+const wbCanvasRef = ref(null)
+let layoutTimer = null
+const pendingQIndex = ref(null)
+const customImageBi = ref(null)
+const customImageMode = ref(false)
+const uid = () => 'wb_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
+const normalizeLayout = (arr) => (arr || []).filter(b => b && b.type)
+
+const flushLayout = async () => { if (layoutDirty.value) await saveLayout(false) }
+const onModeChange = async (val) => {
+  if (val === 'workbook') {
+    await questionRichEditorRef.value?.flush?.()
+    layout.value = normalizeLayout(practice.value?.layout_document)
+    mode.value = 'workbook'
+    schedulePreview()
+  } else {
+    await flushLayout()
+    mode.value = 'single'
+  }
+}
+const onLayoutChange = (arr) => {
+  layout.value = arr
+  layoutDirty.value = true
+  clearTimeout(layoutTimer)
+  layoutTimer = setTimeout(() => saveLayout(false), 1200)
+}
+const saveLayout = async (manual) => {
+  clearTimeout(layoutTimer)
+  layoutDirty.value = false
+  layoutSaving.value = true
+  try {
+    const res = await axios.put(`/api/practices/${practiceId}/layout`, { layout: layout.value })
+    practice.value = res.data
+    layout.value = normalizeLayout(res.data.layout_document)
+    if (manual) ElMessage.success('整册结构已保存')
+    schedulePreview()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '保存失败')
+    layoutDirty.value = true
+  } finally { layoutSaving.value = false }
+}
+const onTreeQuestionClick = async (s, q) => {
+  if (mode.value === 'workbook') await flushLayout()
+  await selectQuestion(s, q)
+}
+const openQuestionFromWorkbook = async (qid) => {
+  await flushLayout()
+  const s = (practice.value?.sections || []).find(sec => sec.questions.some(x => x.id === qid))
+  const q = s?.questions.find(x => x.id === qid)
+  if (!s || !q) return
+  mode.value = 'single'
+  await selectQuestion(s, q)
+}
+const insertQuestionFromWorkbook = (index) => {
+  pendingQIndex.value = index
+  openAddQuestions()
+}
+const afterQuestionsAdded = (addedIds) => {
+  if (pendingQIndex.value === null || !addedIds?.length) { pendingQIndex.value = null; return }
+  const idx = pendingQIndex.value
+  const blocks = JSON.parse(JSON.stringify(layout.value))
+  addedIds.forEach((qid, k) => {
+    blocks.splice(idx + k, 0, { type: 'question_ref', id: uid(), question_id: qid })
+  })
+  layout.value = blocks
+  pendingQIndex.value = null
+  layoutDirty.value = true
+  clearTimeout(layoutTimer)
+  layoutTimer = setTimeout(() => saveLayout(false), 600)
+}
+const removeQuestionFromWorkbook = async (qid) => {
+  await axios.delete(`/api/practices/${practiceId}/questions/${qid}`)
+  layout.value = (layout.value || []).filter(b => !(b.type === 'question_ref' && b.question_id === qid))
+  layoutDirty.value = true
+  await saveLayout(false)
+  await load()
+}
+const onWorkbookTitleChange = async (t) => {
+  if (!t || t === practice.value?.title) return
+  await axios.put(`/api/practices/${practiceId}`, { title: t })
+  if (practice.value) practice.value.title = t
+  schedulePreview()
+}
+const pickImageForCustom = async (bi) => {
+  const res = await axios.get(`/api/practices/${practiceId}/assets-list`)
+  assets.value = res.data.assets
+  customImageBi.value = bi
+  customImageMode.value = true
+  showImagePicker.value = true
+}
 const showRegroup = ref(false)
 const regroup = ref({ changes: [] })
 const showMove = ref(false)
@@ -300,10 +416,14 @@ const addQText = (c) => (c || '').replace(/!\[[^\]]*\]\([^)]*\)/g, '[图]').slic
 const addSelectedQuestions = async () => {
   addQ.adding = true
   try {
+    const before = new Set((practice.value?.sections || []).flatMap(s => s.questions.map(q => q.id)))
     const res = await axios.post(`/api/practices/${practiceId}/questions/add`,
       { question_ids: addQ.selected.map(r => r.id) })
     practice.value = res.data
     addQ.show = false
+    const added = (practice.value?.sections || []).flatMap(s => s.questions.map(q => q.id))
+      .filter(id => !before.has(id))
+    if (mode.value === 'workbook') afterQuestionsAdded(added)
     schedulePreview()
     ElMessage.success(`已添加 ${addQ.selected.length} 题`)
   } catch (e) {
@@ -457,7 +577,11 @@ const openReplacePicker = async () => {
 }
 const insertImage = (name) => {
   const src = `asset://practice/${name}`
-  if (replaceMode.value) {
+  if (customImageMode.value) {
+    const resolved = `/api/practices/${practiceId}/assets/${name}`
+    wbCanvasRef.value?.insertImageAt?.(customImageBi.value, resolved)
+    customImageMode.value = false
+  } else if (replaceMode.value) {
     questionRichEditorRef.value?.replaceImageBlock?.(src)
   } else {
     questionRichEditorRef.value?.insertImageBlock?.(src)
@@ -486,6 +610,7 @@ const updateMeta = async () => {
 }
 const goBack = async () => {
   await questionRichEditorRef.value?.flush?.()
+  await flushLayout()
   router.push('/practices')
 }
 

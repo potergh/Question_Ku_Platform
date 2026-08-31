@@ -19,6 +19,9 @@ class Practice(Base):
     grade: Mapped[str | None] = mapped_column(String(20), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="draft")  # draft / exported
     page_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 阶段 5：整册编排布局（线性块序列：subtitle/question_ref/custom_text/spacer/page_break）。
+    # 空/None = 未迁移，渲染走旧 sections；整册保存后为真源，sections 同步保持一致（架构 A 并存可回退）。
+    layout_document: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # 阶段 0 新文档结构迁移状态：pending（待迁移）/ done / failed / native（新建即用新结构）
     migration_status: Mapped[str] = mapped_column(String(20), default="pending")
     migration_note: Mapped[str | None] = mapped_column(Text, nullable=True)

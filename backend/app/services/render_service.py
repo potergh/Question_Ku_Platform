@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 from app.models.practice import Practice
-from app.services import doc_render, practice_service, typography
+from app.services import doc_render, practice_service, typography, workbook_layout
 
 MARGIN_PRESETS = {"narrow": "15mm", "normal": "25mm", "wide": "32mm"}
 
@@ -120,7 +120,10 @@ def build_practice_html(practice: Practice, practice_id: str) -> str:
     if s["show_info_bar"]:
         head.append('<div class="info-bar">姓名：____________　班级：____________　日期：____________</div>')
 
-    body = _section_bodies(practice, s)
+    if practice.layout_document:
+        body = _layout_bodies(practice, s, practice_id)
+    else:
+        body = _section_bodies(practice, s)
     return _head_css(s["default_style"]) + '<body>' + "".join(head + body) + _katex_tags() + '</body></html>'
 
 
@@ -141,6 +144,54 @@ def _section_bodies(practice: Practice, s: dict) -> list[str]:
                 continue
             blocks = sorted(pq.blocks, key=lambda b: b.position)
             out.append(f'<div class="question">{_blocks_html(blocks, practice.id, prefix)}</div>')
+    return out
+
+
+def _custom_text_html(blk: dict, practice_id: str) -> str:
+    html = workbook_layout.sanitize_custom_html(blk.get("html") or "")
+    html = workbook_layout.resolve_custom_asset_srcs(
+        html, practice_id, lambda name: (practice_service.practice_assets_dir(practice_id) / name).as_uri())
+    align = blk.get("align") or "left"
+    return f'<div class="q-custom" style="text-align:{align}">{html}</div>'
+
+
+def _layout_bodies(practice: Practice, s: dict, practice_id: str) -> list[str]:
+    """阶段 5：按整册布局块序列渲染（小节标题带"一、二、三"序号；题目整册连续题号；
+    自定义内容/空白/分页符按序插入）。"""
+    out: list[str] = []
+    qmap = {pq.id: pq for sec in practice.sections for pq in sec.questions}
+    q_no, sub_no = 0, 0
+    for blk in practice.layout_document or []:
+        t = blk.get("type")
+        if t == "subtitle":
+            sub_no += 1
+            if blk.get("start_on_new_page"):
+                out.append('<div class="new-page"></div>')
+            if blk.get("show_title", True):
+                title = blk.get("title") or "小节"
+                num = workbook_layout.section_label(sub_no)
+                out.append(f'<div class="section-title">{num}、{_html.escape(title)}</div>')
+        elif t == "question_ref":
+            pq = qmap.get(blk.get("question_id"))
+            if pq is None:
+                continue
+            q_no += 1
+            prefix = f"{q_no}. "
+            if s["show_score"] and pq.score is not None:
+                prefix += f"（{pq.score:g} 分）"
+            doc = _parse_rich_doc(pq)
+            if doc is not None:
+                out.append(f'<div class="question">{doc_render.question_html(doc, practice.id, prefix)}</div>')
+            else:
+                blocks = sorted(pq.blocks, key=lambda b: b.position)
+                out.append(f'<div class="question">{_blocks_html(blocks, practice.id, prefix)}</div>')
+        elif t == "custom_text":
+            out.append(_custom_text_html(blk, practice_id))
+        elif t == "spacer":
+            h = int(blk.get("height") or 20)
+            out.append(f'<div class="q-spacer" style="height:{max(h, 4)}px"></div>')
+        elif t == "page_break":
+            out.append('<div class="new-page"></div>')
     return out
 
 
@@ -223,6 +274,7 @@ def _head_css(default_style: dict | None = None) -> str:
             '.q-list { margin: 2px 0 2px 2em; padding: 0; }'
             '.q-list li { margin: 1px 0; }'
             '.space-line { height: 1.9em; }'   # 答题留白：纯空白不画横线（用户决策 2026-08-30）
+            '.q-custom img { max-width: 100%; height: auto; }'   # 自定义内容图片不超内容区
             '</style></head>')
 
 

@@ -21,14 +21,14 @@ from app.models import Question
 from app.models.basket import SelectionBasketItem
 from app.models.practice import Practice, PracticeContentBlock, PracticeQuestion, PracticeSection
 from app.schemas.practice import (
-    PracticeBrief, PracticeCreateRequest, PracticeListResponse,
+    PracticeBrief, PracticeCreateRequest, PracticeLayoutUpdateRequest, PracticeListResponse,
     PracticeQuestionOut, PracticeResponse, PracticeSectionOut, PracticeUpdateRequest,
     PreviewRenderResponse,
 )
 from app.services import practice_service
 from app.services import block_service
 from app.services import docx_export
-from app.services import preview_service, render_service
+from app.services import preview_service, render_service, workbook_layout
 from app.services.rich_document import validate_doc
 
 router = APIRouter()
@@ -102,7 +102,8 @@ def _practice_response(practice: Practice) -> PracticeResponse:
         subject=practice.subject, grade=practice.grade, status=practice.status,
         question_count=total, is_baseline=practice.is_baseline,
         created_at=practice.created_at, updated_at=practice.updated_at,
-        page_config=practice.page_config, sections=sections,
+        page_config=practice.page_config, layout_document=practice.layout_document,
+        sections=sections,
     )
 
 
@@ -185,6 +186,9 @@ async def get_practice(practice_id: str, db: AsyncSession = Depends(get_db)):
     practice = await _get_practice_full(db, practice_id)
     if not practice:
         raise HTTPException(404, "Practice not found")
+    await workbook_layout.ensure_layout(db, practice)   # 阶段 5：惰性迁移（sections→布局），可回退
+    await db.commit()
+    practice = await _get_practice_full(db, practice_id)  # 提交后重载，避免 onupdate 属性过期触发同步懒加载
     return _practice_response(practice)
 
 
@@ -197,6 +201,20 @@ async def update_practice(practice_id: str, req: PracticeUpdateRequest, db: Asyn
         setattr(practice, field, value)
     await db.commit()
     return await get_practice(practice_id, db)
+
+
+@router.put("/api/practices/{practice_id}/layout", response_model=PracticeResponse)
+async def save_practice_layout(practice_id: str, req: PracticeLayoutUpdateRequest,
+                               db: AsyncSession = Depends(get_db)):
+    """阶段 5：保存整册编排布局（线性块序列），同步 sections 保持一致（架构 A）。"""
+    practice = await _get_practice_full(db, practice_id)
+    if not practice:
+        raise HTTPException(404, "Practice not found")
+    layout = await workbook_layout.sync_sections_from_layout(db, practice, req.layout)
+    practice.layout_document = layout
+    await db.commit()
+    practice = await _get_practice_full(db, practice_id)
+    return _practice_response(practice)
 
 
 @router.delete("/api/practices/{practice_id}")
@@ -246,6 +264,9 @@ async def get_practice_detail(practice_id: str, db: AsyncSession = Depends(get_d
     practice = await _get_practice_full(db, practice_id)
     if not practice:
         raise HTTPException(404, "Practice not found")
+    await workbook_layout.ensure_layout(db, practice)   # 阶段 5：整册布局惰性迁移
+    await db.commit()
+    practice = await _get_practice_full(db, practice_id)  # 提交后重载避免过期属性
     materialized = False
     for s in practice.sections:
         for pq in s.questions:

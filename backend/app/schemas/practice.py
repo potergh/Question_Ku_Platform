@@ -23,6 +23,11 @@ class PracticeUpdateRequest(BaseModel):
     page_config: dict | None = None
 
 
+class PracticeLayoutUpdateRequest(BaseModel):
+    """阶段 5：整册编排布局保存（线性块序列，见 workbook_layout）。"""
+    layout: list[dict]
+
+
 class PracticeBrief(BaseModel):
     id: str
     title: str
@@ -87,6 +92,7 @@ class PracticeResponse(BaseModel):
     created_at: datetime
     updated_at: datetime | None = None
     page_config: dict | None = None
+    layout_document: list | None = None
     sections: list[PracticeSectionOut]
 
 

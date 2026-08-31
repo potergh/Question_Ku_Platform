@@ -3,6 +3,7 @@
 import io
 import json
 import re
+from html.parser import HTMLParser
 from pathlib import Path
 
 from docx import Document
@@ -13,7 +14,7 @@ from docx.oxml.ns import qn, nsdecls
 from docx.oxml import OxmlElement, parse_xml
 from docx.shared import Cm, Pt
 
-from app.services import practice_service, typography
+from app.services import practice_service, typography, workbook_layout
 from app.services.doc_render import norm_para_attrs
 from app.services.render_service import render_settings, _parse_rich_doc, katex_dist_dir
 
@@ -163,26 +164,181 @@ def _build_docx_inner(practice, practice_id: str, fb: "_FormulaFallback") -> byt
         doc.add_paragraph("姓名：____________　班级：____________　日期：____________")
 
     assets = practice_service.practice_assets_dir(practice_id)
-    for section in practice.sections:
-        if section.start_on_new_page:
-            bp = doc.add_paragraph()
-            bp.add_run().add_break(WD_BREAK.PAGE)
-        if section.show_title:
-            sp = doc.add_paragraph()
-            sr = sp.add_run(section.title)
-            sr.bold = True
-            sr.font.size = Pt(13)
-            _set_cn_font(sr)
-        for pq in section.questions:
-            rich = _parse_rich_doc(pq)
-            if rich is not None:   # 阶段 2：富文档为真源（marks 贯通 Word）
-                _add_question_from_doc(doc, rich, pq, assets, content_width, s, fb)
-            else:
-                _add_question(doc, pq, assets, content_width, s, fb)
+    if practice.layout_document:
+        _add_layout_docx(doc, practice, practice_id, assets, content_width, s, fb)
+    else:
+        for section in practice.sections:
+            if section.start_on_new_page:
+                bp = doc.add_paragraph()
+                bp.add_run().add_break(WD_BREAK.PAGE)
+            if section.show_title:
+                sp = doc.add_paragraph()
+                sr = sp.add_run(section.title)
+                sr.bold = True
+                sr.font.size = Pt(13)
+                _set_cn_font(sr)
+            for pq in section.questions:
+                rich = _parse_rich_doc(pq)
+                if rich is not None:   # 阶段 2：富文档为真源（marks 贯通 Word）
+                    _add_question_from_doc(doc, rich, pq, assets, content_width, s, fb)
+                else:
+                    _add_question(doc, pq, assets, content_width, s, fb)
 
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
+
+
+def _add_layout_docx(doc, practice, practice_id, assets: Path, content_width, s: dict, fb):
+    """阶段 5：按整册布局块序列导出 Word（与 PDF/预览顺序一致）。"""
+    qmap = {pq.id: pq for sec in practice.sections for pq in sec.questions}
+    q_no, sub_no = 0, 0
+    for blk in practice.layout_document or []:
+        t = blk.get("type")
+        if t == "subtitle":
+            sub_no += 1
+            if blk.get("start_on_new_page"):
+                bp = doc.add_paragraph()
+                bp.add_run().add_break(WD_BREAK.PAGE)
+            if blk.get("show_title", True):
+                sp = doc.add_paragraph()
+                sr = sp.add_run(f"{workbook_layout.section_label(sub_no)}、{blk.get('title') or '小节'}")
+                sr.bold = True
+                sr.font.size = Pt(13)
+                _set_cn_font(sr)
+        elif t == "question_ref":
+            pq = qmap.get(blk.get("question_id"))
+            if pq is None:
+                continue
+            q_no += 1
+            # 用整册序号临时覆盖题号渲染前缀（question_number 在同步时已对齐，此处再保险）
+            orig = pq.question_number
+            pq.question_number = q_no
+            try:
+                rich = _parse_rich_doc(pq)
+                if rich is not None:
+                    _add_question_from_doc(doc, rich, pq, assets, content_width, s, fb)
+                else:
+                    _add_question(doc, pq, assets, content_width, s, fb)
+            finally:
+                pq.question_number = orig
+        elif t == "custom_text":
+            _add_custom_html(doc, blk.get("html") or "", assets, content_width)
+        elif t == "spacer":
+            h = max(int(blk.get("height") or 20), 4)
+            sp = doc.add_paragraph("")
+            sp.paragraph_format.space_before = Pt(h * 0.75)
+            sp.paragraph_format.space_after = Pt(0)
+        elif t == "page_break":
+            bp = doc.add_paragraph()
+            bp.add_run().add_break(WD_BREAK.PAGE)
+
+
+def _add_custom_html(doc, html: str, assets: Path, content_width):
+    """净化后的自定义内容简单富文本 → Word 段落（p/div/br/strong/em/u/img）。"""
+    handler = _CustomHtmlDocx(doc, assets, content_width)
+    handler.feed(workbook_layout.sanitize_custom_html(html))
+    handler.close()
+
+
+class _CustomHtmlDocx(HTMLParser):
+    """自定义内容 HTML → Word：块级标签起段，行内 strong/em/u 记入 run 样式，img 按内容宽插入。"""
+    _BLOCK = {"p", "div", "h1", "h2", "h3", "li", "ol", "ul"}
+
+    def __init__(self, doc, assets: Path, content_width):
+        super().__init__(convert_charrefs=True)
+        self.doc = doc
+        self.assets = assets
+        self.content_width = content_width
+        self._stack: list = []
+        self._runs: list = []
+        self._para = None
+
+    def _new_para(self):
+        if self._para is None:
+            self._para = self.doc.add_paragraph()
+        return self._para
+
+    def _flush(self, br: bool = False):
+        para = self._new_para()
+        for text, b, i, u in self._runs:
+            if not text:
+                continue
+            r = para.add_run(text)
+            r.bold = b
+            r.italic = i
+            r.underline = u
+            _set_cn_font(r)
+        self._runs = []
+        if br:
+            para.add_run().add_break()
+
+    def _close_para(self):
+        self._flush()
+        self._para = None
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag in self._BLOCK:
+            self._close_para()
+            self._new_para()
+            if tag.startswith("h") and "b" not in self._stack:
+                self._stack.append("b")
+        elif tag == "br":
+            self._flush(br=True)
+        elif tag == "img":
+            self._flush()
+            src = dict(attrs).get("src", "")
+            name = src.removeprefix("asset://practice/")
+            if name:
+                self._add_img(name)
+        elif tag in ("strong", "b"):
+            self._stack.append("b")
+        elif tag in ("em", "i"):
+            self._stack.append("i")
+        elif tag == "u":
+            self._stack.append("u")
+        elif tag in ("span", "s", "sub", "sup"):
+            self._stack.append(tag)
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in self._BLOCK:
+            self._close_para()
+            return
+        for fmt in ("b", "i", "u", "span", "s", "sub", "sup"):
+            if tag == fmt and fmt in self._stack:
+                self._stack.remove(fmt)
+
+    def handle_data(self, data):
+        if not data:
+            return
+        self._new_para()
+        self._runs.append((data, "b" in self._stack, "i" in self._stack, "u" in self._stack))
+
+    def close(self):
+        super().close()
+        self._close_para()
+
+    def _add_img(self, name):
+        fp = self.assets / name
+        if not fp.exists():
+            return
+        try:
+            from PIL import Image
+            from docx.shared import Cm
+            im = Image.open(fp)
+            px_w, px_h = im.size
+            max_w = min(int(Cm(8)), int(self.content_width))
+            if px_w <= 0 or max_w <= 0:
+                return
+            ratio = max_w / (px_w * 914400 // 96)
+            h = int((px_h * 914400 // 96) * ratio)
+            r = self._new_para().add_run()
+            with io.BytesIO(fp.read_bytes()) as stream:
+                r.add_picture(stream, width=max_w, height=h)
+        except Exception:
+            pass
 
 
 def _set_cn_font(run, name="宋体"):
