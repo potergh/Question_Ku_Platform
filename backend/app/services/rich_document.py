@@ -250,6 +250,24 @@ def doc_from_snapshot(content: str | None, options: list | None,
     return {"type": "doc", "schema_version": DOC_SCHEMA_VERSION, "content": nodes}
 
 
+def add_image_layout_default(doc: dict) -> int:
+    """阶段 4：为缺失 layout 的 image 节点补默认 "row"（与后端并排渲染一致）。
+    就地修改 doc；返回补全节点数。幂等：已带 layout 的节点不动。"""
+    count = 0
+    stack = list(doc.get("content") or [])
+    while stack:
+        n = stack.pop()
+        if n.get("type") == "image":
+            attrs = n.setdefault("attrs", {})
+            if "layout" not in attrs:
+                attrs["layout"] = "row"
+                count += 1
+        children = n.get("content")
+        if isinstance(children, list):
+            stack.extend(children)
+    return count
+
+
 def serialize(doc: dict) -> str:
     return json.dumps(doc, ensure_ascii=False)
 

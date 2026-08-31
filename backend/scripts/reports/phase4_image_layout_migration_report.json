@@ -1,0 +1,13 @@
+{
+  "mode": "dry-run",
+  "started_at": "2026-08-31T18:51:22",
+  "db_path": "D:\\家教\\Question_Ku_Platform\\data\\db.sqlite3",
+  "backup_path": null,
+  "practices": 8,
+  "questions": 66,
+  "image_nodes": 87,
+  "patched_nodes": 0,
+  "multi_image_questions": 19,
+  "failed": [],
+  "finished_at": "2026-08-31T18:51:22"
+}
