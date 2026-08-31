@@ -314,7 +314,15 @@ class _CustomHtmlDocx(HTMLParser):
         if not data:
             return
         self._new_para()
-        self._runs.append((data, "b" in self._stack, "i" in self._stack, "u" in self._stack))
+        for is_math, text, display in _split_math(data):
+            if is_math:
+                el = _latex_to_omml(text, display)
+                if el is not None:
+                    self._flush()
+                    self._para._p.append(el)
+                    continue
+                text = f"{'$$' if display else '$'}{text}{'$$' if display else '$'}"
+            self._runs.append((text, "b" in self._stack, "i" in self._stack, "u" in self._stack))
 
     def close(self):
         super().close()

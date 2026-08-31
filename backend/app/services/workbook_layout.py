@@ -29,6 +29,28 @@ _TAG_FULL_RE = re.compile(r"<(/)?([a-zA-Z][a-zA-Z0-9]*)((?:\s+[a-zA-Z_:][-a-zA-Z
 _ASSET_SRC_RE = re.compile(r'src="asset://practice/([^"]+)"')
 
 
+# 自定义内容允许保留的内联 CSS 属性（白名单，防注入）
+_CSS_ALLOWED = {"font-family", "font-size", "color", "line-height",
+                "margin-top", "margin-bottom", "margin-left", "text-indent", "text-align"}
+
+
+def _clean_css_style(raw: str) -> str:
+    out = []
+    for decl in (raw or "").split(";"):
+        if ":" not in decl:
+            continue
+        prop, _, val = decl.partition(":")
+        prop = prop.strip().lower()
+        val = val.strip()
+        if not prop or not val or prop not in _CSS_ALLOWED:
+            continue
+        low = val.lower()
+        if "url(" in low or "expression(" in low or "javascript" in low:
+            continue
+        out.append(f"{prop}: {val}")
+    return "; ".join(out)
+
+
 def sanitize_custom_html(html: str) -> str:
     """轻量净化自定义内容 HTML：去 script/style/iframe、事件属性、javascript:；
     仅保留白名单标签与 img 的 src 属性。"""
@@ -47,6 +69,11 @@ def sanitize_custom_html(html: str) -> str:
         if name == "img":
             for am in re.finditer(r'src=("[^"]*"|\'[^\']*\')', attrs, flags=re.I):
                 keep += f" src={am.group(1)}"
+        sm = re.search(r'style="([^"]*)"', attrs, flags=re.I)
+        if sm:
+            clean = _clean_css_style(sm.group(1))
+            if clean:
+                keep += f' style="{clean}"'
         return f"</{name}>" if closing else f"<{name}{keep}>"
 
     return _TAG_FULL_RE.sub(repl, s)

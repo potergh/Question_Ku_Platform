@@ -63,7 +63,6 @@
       <!-- 中：整册编排画布 / 单题所见即所得编辑区 -->
       <div class="edit-panel">
         <WorkbookCanvas v-if="mode === 'workbook'"
-          ref="wbCanvasRef"
           :practice-id="practiceId"
           :sections="practice?.sections || []"
           :layout="layout"
@@ -72,8 +71,7 @@
           @open-question="openQuestionFromWorkbook"
           @insert-question="insertQuestionFromWorkbook"
           @remove-question="removeQuestionFromWorkbook"
-          @update:title="onWorkbookTitleChange"
-          @pick-image="pickImageForCustom" />
+          @update:title="onWorkbookTitleChange" />
         <template v-else>
         <el-empty v-if="!selected" description="从左侧选择一道题开始编辑" />
         <div v-else class="question-editor">
@@ -143,10 +141,32 @@
     <!-- 从题库添加题目 -->
     <el-dialog v-model="addQ.show" title="从题库添加题目" width="720px" top="6vh">
       <div class="addq-filter">
-        <el-input v-model="addQ.search" placeholder="搜索题目内容…" clearable style="width:260px"
+        <el-input v-model="addQ.search" placeholder="搜索题目内容…" clearable style="width:230px"
                   @keyup.enter="loadAddQList" @clear="loadAddQList" />
-        <el-select v-model="addQ.type" placeholder="题型" clearable style="width:120px" @change="loadAddQList">
+        <el-select v-model="addQ.subject" placeholder="学科" clearable style="width:96px" @change="loadAddQList">
+          <el-option v-for="t in ['物理','化学','数学','英语','语文','生物','地理','历史','政治']" :key="t" :label="t" :value="t" />
+        </el-select>
+        <el-select v-model="addQ.grade" placeholder="年级" clearable style="width:96px" @change="loadAddQList">
+          <el-option v-for="g in ['初一','初二','初三','中考','高一','高二','高三']" :key="g" :label="g" :value="g" />
+        </el-select>
+        <el-select v-model="addQ.type" placeholder="题型" clearable style="width:100px" @change="loadAddQList">
           <el-option v-for="t in ['选择题','多选题','填空题','实验题','计算题','解答题','简答题']" :key="t" :label="t" :value="t" />
+        </el-select>
+        <el-select v-model="addQ.difficulty" placeholder="难度" clearable style="width:90px" @change="loadAddQList">
+          <el-option v-for="d in [1,2,3,4,5]" :key="d" :label="['容易','较易','中等','较难','困难'][d-1]" :value="d" />
+        </el-select>
+        <el-select v-model="addQ.has_explanation" placeholder="解析" clearable style="width:90px" @change="loadAddQList">
+          <el-option label="有解析" :value="true" />
+          <el-option label="无解析" :value="false" />
+        </el-select>
+        <el-select v-model="addQ.tag_id" placeholder="标签" clearable filterable style="width:130px" @change="loadAddQList">
+          <el-option-group v-for="g in addQTagGroups" :key="g" :label="g">
+            <el-option v-for="t in addQ.tags.filter(x => x.category === g)"
+                       :key="t.id" :label="t.name" :value="t.id" />
+          </el-option-group>
+        </el-select>
+        <el-select v-model="addQ.source_id" placeholder="来源试卷" clearable filterable style="width:150px" @change="loadAddQList">
+          <el-option v-for="src in addQ.sources" :key="src.id" :label="`${src.filename}（${src.question_count}题）`" :value="src.id" />
         </el-select>
         <el-button :loading="addQ.loading" @click="loadAddQList">搜索</el-button>
       </div>
@@ -274,11 +294,8 @@ const mode = ref('single')
 const layout = ref([])
 const layoutDirty = ref(false)
 const layoutSaving = ref(false)
-const wbCanvasRef = ref(null)
 let layoutTimer = null
 const pendingQIndex = ref(null)
-const customImageBi = ref(null)
-const customImageMode = ref(false)
 const uid = () => 'wb_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
 const normalizeLayout = (arr) => (arr || []).filter(b => b && b.type)
 
@@ -357,13 +374,6 @@ const onWorkbookTitleChange = async (t) => {
   if (practice.value) practice.value.title = t
   schedulePreview()
 }
-const pickImageForCustom = async (bi) => {
-  const res = await axios.get(`/api/practices/${practiceId}/assets-list`)
-  assets.value = res.data.assets
-  customImageBi.value = bi
-  customImageMode.value = true
-  showImagePicker.value = true
-}
 const showRegroup = ref(false)
 const regroup = ref({ changes: [] })
 const showMove = ref(false)
@@ -395,20 +405,39 @@ const selectQuestion = async (s, q) => {
 const refresh = async () => { await load(); selected.value = null }
 
 // 从题库继续添加题目到已有练习（重复题不可再选，后端也会去重）
-const addQ = reactive({ show: false, search: '', type: '', loading: false, adding: false,
-  list: [], selected: [], existing: new Set() })
+const addQ = reactive({ show: false, search: '', type: '', subject: '', grade: '',
+  difficulty: undefined, has_explanation: undefined, source_id: '', tag_id: '',
+  loading: false, adding: false, list: [], selected: [], existing: new Set(), sources: [], tags: [] })
 const openAddQuestions = async () => {
   addQ.existing = new Set(
     (practice.value?.sections || []).flatMap(s => s.questions.map(q => q.source_question_id)))
   addQ.selected = []
   addQ.show = true
+  if (!addQ.sources.length) {
+    try {
+      const res = await axios.get('/api/sources')
+      addQ.sources = res.data?.sources || []
+    } catch (e) { addQ.sources = [] }
+  }
+  if (!addQ.tags.length) {
+    try {
+      const res = await axios.get('/api/tags')
+      addQ.tags = res.data || []
+    } catch (e) { addQ.tags = [] }
+  }
   await loadAddQList()
 }
+const addQTagGroups = computed(() => [...new Set(addQ.tags.map(t => t.category).filter(Boolean))])
 const loadAddQList = async () => {
   addQ.loading = true
   try {
     const res = await axios.get('/api/questions', { params: {
-      search: addQ.search || undefined, question_type: addQ.type || undefined, page_size: 100 } })
+      search: addQ.search || undefined, question_type: addQ.type || undefined,
+      subject: addQ.subject || undefined, grade: addQ.grade || undefined,
+      difficulty: addQ.difficulty ?? undefined,
+      has_explanation: addQ.has_explanation ?? undefined,
+      source_id: addQ.source_id || undefined,
+      tag_ids: addQ.tag_id || undefined, page_size: 100 } })
     addQ.list = res.data.questions
   } finally { addQ.loading = false }
 }
@@ -577,11 +606,7 @@ const openReplacePicker = async () => {
 }
 const insertImage = (name) => {
   const src = `asset://practice/${name}`
-  if (customImageMode.value) {
-    const resolved = `/api/practices/${practiceId}/assets/${name}`
-    wbCanvasRef.value?.insertImageAt?.(customImageBi.value, resolved)
-    customImageMode.value = false
-  } else if (replaceMode.value) {
+  if (replaceMode.value) {
     questionRichEditorRef.value?.replaceImageBlock?.(src)
   } else {
     questionRichEditorRef.value?.insertImageBlock?.(src)

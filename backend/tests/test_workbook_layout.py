@@ -223,3 +223,37 @@ async def test_layout_rendering_equals_sections_when_migrated(test_db, tmp_path)
     html_old = build_practice_html(p, pid)
     assert "选择题" in html_old and "填空题" in html_old
     assert "第一题" in html_old and "第二题" in html_old
+
+async def test_sanitize_custom_style(test_db, tmp_path):
+    """净化保留白名单内联样式，剥离注入样式。"""
+    html = '<p style="font-family: 宋体; font-size: 12pt; color: red; ' \
+           'background-image: url(https://evil/x); width: 10000px">文字</p>' \
+           '<span style="line-height: 1.7; text-align: center">说明</span>'
+    out = workbook_layout.sanitize_custom_html(html)
+    assert 'font-family: 宋体' in out
+    assert 'font-size: 12pt' in out
+    assert 'color: red' in out
+    assert 'line-height: 1.7' in out
+    assert 'url(' not in out
+    assert 'width' not in out.replace('max-width', '')
+    assert 'script' not in out.lower()
+
+
+async def test_docx_custom_text_formula(test_db, tmp_path):
+    """自定义内容中的 $..$ 公式在 Word 中转为 OMML（可编辑公式）。"""
+    import zipfile
+    pid, ids = await _setup_render_layout(test_db, tmp_path, [
+        {"type": "custom_text", "id": "c1", "html": "<p>速度 $v=\\frac{s}{t}$，位移公式 $$s=vt$$</p>"},
+    ])
+    practice = await _load_with_blocks(test_db, pid)
+    data, degraded = docx_export.build_docx(practice, pid)
+    assert data
+    doc = Document(io.BytesIO(data))
+    joined = "\n".join(par.text for par in doc.paragraphs)
+    assert "速度" in joined
+    assert "位移公式" in joined
+    # 公式已转 OMML：document.xml 含 m:oMath；LaTeX 原文不应出现在纯文本
+    z = zipfile.ZipFile(io.BytesIO(data))
+    xml = z.read("word/document.xml").decode("utf-8")
+    assert "<m:oMath" in xml
+    assert "frac{s}{t}" not in xml

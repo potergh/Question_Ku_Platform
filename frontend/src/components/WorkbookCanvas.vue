@@ -81,25 +81,8 @@
             <el-button size="small" text type="danger" @click="removeBlock(bi, blk)">✖</el-button>
           </div>
           <div class="wb-custom-body">
-            <div class="wb-richtool">
-              <el-button size="small" text @mousedown.prevent="exec('bold')"><b>B</b></el-button>
-              <el-button size="small" text @mousedown.prevent="exec('italic')"><i>I</i></el-button>
-              <el-button size="small" text @mousedown.prevent="exec('underline')"><u>U</u></el-button>
-              <el-select size="small" style="width:92px" :model-value="'normal'" @change="v => exec('formatBlock', v)">
-                <el-option label="正文" value="normal" />
-                <el-option label="标题1" value="h1" />
-                <el-option label="标题2" value="h2" />
-                <el-option label="标题3" value="h3" />
-              </el-select>
-              <el-button size="small" text @mousedown.prevent="exec('justifyLeft')">左</el-button>
-              <el-button size="small" text @mousedown.prevent="exec('justifyCenter')">中</el-button>
-              <el-button size="small" text @mousedown.prevent="exec('justifyRight')">右</el-button>
-              <el-button size="small" @mousedown.prevent="pickImage(bi)"><el-icon><Picture /></el-icon> 图片</el-button>
-              <el-button size="small" text @mousedown.prevent="exec('removeFormat')">清除格式</el-button>
-            </div>
-            <div class="wb-editable" contenteditable="true" spellcheck="false"
-                 :data-bi="bi" :innerHTML="displayHtml(blk.html)"
-                 @input="onCustomInput(bi, $event)"></div>
+            <SimpleTextEditor v-model="blk.html" :practice-id="practiceId"
+              @update:model-value="onCustomChange(bi, $event)" />
           </div>
         </div>
 
@@ -169,6 +152,7 @@
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
+import SimpleTextEditor from './richeditor/SimpleTextEditor.vue'
 
 const props = defineProps({
   practiceId: { type: String, required: true },
@@ -176,7 +160,7 @@ const props = defineProps({
   layout: { type: Array, default: () => [] },
   title: { type: String, default: '' },
 })
-const emit = defineEmits(['update:title', 'open-question', 'insert-question', 'change', 'remove-question', 'pick-image'])
+const emit = defineEmits(['update:title', 'open-question', 'insert-question', 'change', 'remove-question'])
 
 // 本地块列表：与父级 layout 同步
 const blocks = ref(JSON.parse(JSON.stringify(props.layout || [])))
@@ -276,39 +260,13 @@ const onDrop = (bi) => {
   commit()
 }
 
-// ---- 说明文字富文本 ----
-const toDisplay = (html) => (html || '').replace(/asset:\/\/practice\//g,
-  `/api/practices/${props.practiceId}/assets/`)
-const toStore = (html) => (html || '').replace(new RegExp(`/api/practices/${props.practiceId}/assets/`, 'g'),
-  'asset://practice/')
-const displayHtml = (html) => toDisplay(html)
-const onCustomInput = (bi, e) => {
-  const el = e.target
-  blocks.value[bi].html = toStore(el.innerHTML)
+// ---- 说明文字富文本（SimpleTextEditor 复用单题编辑器 TipTap 内核）----
+const onCustomChange = (bi, html) => {
+  blocks.value[bi].html = html
   commit()
-}
-const exec = (cmd, val) => {
-  document.execCommand(cmd, false, val || null)
-  // 触发一次 input 以同步内容
-  const el = document.activeElement
-  if (el && el.classList.contains('wb-editable')) el.dispatchEvent(new Event('input', { bubbles: true }))
-}
-const pickImage = (bi) => {
-  // 用父级图片选择器（复用资产列表）
-  emit('pick-image', bi)
 }
 const titleChanged = (e) => { emit('update:title', e.target.value.trim()) }
 const onTitleChange = (e) => titleChanged(e)
-
-defineExpose({ toDisplay, toStore, insertImageAt })
-function insertImageAt(bi, resolvedSrc) {
-  const el = document.querySelector(`.wb-editable[data-bi="${bi}"]`)
-  if (!el) return
-  el.focus()
-  document.execCommand('insertHTML', false, `<img src="${resolvedSrc}" style="max-width:100%">`)
-  blocks.value[bi].html = toStore(el.innerHTML)
-  commit()
-}
 </script>
 
 <style scoped>
