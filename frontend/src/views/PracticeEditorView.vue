@@ -749,7 +749,7 @@ onMounted(async () => {
 .tree-question:hover .q-ops { display: inline-flex; }
 .edit-panel { flex: 1; overflow-y: auto; padding: 16px; background: #fafafa; }
 .pv-resizer { width: 5px; cursor: col-resize; background: #ebeef5; flex-shrink: 0; transition: background .15s; }
-.addq-filter { display: flex; gap: 8px; margin-bottom: 10px; }
+.addq-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .addq-content { font-size: 12px; line-height: 1.5; white-space: normal; color: #303133; }
 .pv-resizer:hover { background: #c0c4cc; }
 .preview-panel { flex-shrink: 0; border-left: 1px solid #ebeef5; display: flex; flex-direction: column; background: #f0f2f5; }
