@@ -205,7 +205,7 @@ const testConnection = async () => {
   try {
     const res = await axios.post('/api/settings/test', {
       base_url: form.ai_base_url,
-      api_key: form.ai_api_key || 'test',
+      api_key: form.ai_api_key || '',   // 留空时后端回退用已保存的 Key
       model: form.ai_model,
     })
     Object.assign(testResult, res.data)

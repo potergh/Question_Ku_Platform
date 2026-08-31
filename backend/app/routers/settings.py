@@ -74,12 +74,20 @@ async def test_connection(data: TestConnectionRequest, db: AsyncSession = Depend
     """Test AI API connection by making a minimal request."""
     import httpx
 
+    # 前端在 Key 输入框留空时会传占位值（'test'）：回退用已保存的 Key 测试
+    api_key = data.api_key
+    if not api_key or api_key == "test":
+        s = await _get_or_create_settings(db)
+        api_key = s.ai_api_key or ""
+    if not api_key:
+        return TestConnectionResponse(ok=False, message="未配置 API Key，请先填写并保存")
+
     start = time.time()
     try:
         # Build the request to the chat completions endpoint
         url = data.base_url.rstrip("/") + "/chat/completions"
         headers = {
-            "Authorization": f"Bearer {data.api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
         payload = {

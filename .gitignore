@@ -34,3 +34,8 @@ frontend/dist/
 .pytest_cache/
 htmlcov/
 .coverage
+
+# 导出验证产物（可再生，不入库）
+backend/*.docx
+re_export.docx
+verify_export.docx

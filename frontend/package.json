@@ -10,6 +10,14 @@
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.0",
+    "@tiptap/extension-paragraph": "2.14",
+    "@tiptap/extension-subscript": "2.14",
+    "@tiptap/extension-superscript": "2.14",
+    "@tiptap/extension-text-align": "2.14",
+    "@tiptap/extension-text-style": "2.14",
+    "@tiptap/extension-underline": "2.14",
+    "@tiptap/starter-kit": "2.14",
+    "@tiptap/vue-3": "2.14",
     "axios": "^1.7.0",
     "element-plus": "^2.9.0",
     "katex": "^0.18.4",
@@ -20,6 +28,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.1.0",
+    "jsdom": "^30.0.1",
     "vite": "^6.0.0"
   },
   "allowScripts": {

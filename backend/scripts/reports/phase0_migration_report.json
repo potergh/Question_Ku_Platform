@@ -1,0 +1,38 @@
+{
+  "mode": "apply",
+  "started_at": "2026-08-30T01:03:05",
+  "db_path": "D:\\家教\\Question_Ku_Platform\\data\\db.sqlite3",
+  "backup_path": null,
+  "practices": [
+    {
+      "id": "1e5faf6b-3519-4bf8-8ba4-708225a490f9",
+      "title": "练习测试",
+      "status": "done",
+      "questions": 2,
+      "warnings": [],
+      "error": null
+    },
+    {
+      "id": "daf6a44c-2641-45f5-83de-b4a8bf12d932",
+      "title": "初三上混合练习",
+      "status": "done",
+      "questions": 9,
+      "warnings": [],
+      "error": null
+    },
+    {
+      "id": "8c26369f-1e7d-4c28-974d-9bd6104b0433",
+      "title": "1",
+      "status": "done",
+      "questions": 10,
+      "warnings": [],
+      "error": null
+    }
+  ],
+  "summary": {
+    "total": 3,
+    "ok": 3,
+    "failed": 0,
+    "finished_at": "2026-08-30T01:03:05"
+  }
+}

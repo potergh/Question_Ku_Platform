@@ -4,9 +4,9 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from app.config import settings
 from app.database import init_db
@@ -14,9 +14,6 @@ from app.routers import upload, questions, tags, settings as settings_router, ba
 
 
 logging.basicConfig(level=logging.INFO)
-
-# Frontend dist directory (for production serving)
-FRONTEND_DIST = settings.base_dir / "frontend" / "dist"
 
 
 @asynccontextmanager
@@ -67,6 +64,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Formula-Degraded"],   # Word 导出公式降级清单（阶段 3）
 )
 
 # Routers
@@ -83,7 +81,25 @@ async def health_check():
     return {"status": "ok"}
 
 
-# Serve frontend static files (production mode)
-# This must be AFTER all API routes
-if FRONTEND_DIST.exists():
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
+# Serve frontend（生产静态模式）：SPA history 路由回退。
+# 注册在所有 API 路由之后：已注册的 /api 路由优先命中；
+# 未知前端子路径（如 /practice/editor 刷新）返回 index.html 由前端路由接管。
+@app.get("/{full_path:path}", include_in_schema=False)
+async def spa_fallback(full_path: str):
+    # 未注册的 /api/* 路径不得回退到前端，保持 404（避免误吞 API 路由）
+    if full_path == "api" or full_path.startswith("api/"):
+        raise HTTPException(404, "Not Found")
+    dist = settings.base_dir / "frontend" / "dist"
+    index = dist / "index.html"
+    if not index.exists():
+        raise HTTPException(404, "Frontend not built")
+    if full_path:
+        candidate = dist / full_path
+        try:
+            candidate = candidate.resolve()
+            candidate.relative_to(dist.resolve())   # 路径穿越防护：只允许 dist 内文件
+        except (ValueError, OSError):
+            raise HTTPException(404, "Not Found")
+        if candidate.is_file():
+            return FileResponse(candidate)
+    return FileResponse(index)

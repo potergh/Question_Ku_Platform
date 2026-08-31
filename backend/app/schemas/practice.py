@@ -31,6 +31,7 @@ class PracticeBrief(BaseModel):
     grade: str | None = None
     status: str
     question_count: int = 0
+    is_baseline: bool = False
     created_at: datetime
     updated_at: datetime | None = None
 
@@ -60,6 +61,7 @@ class PracticeQuestionOut(BaseModel):
     options: list | None = None
     is_modified: bool
     layout_config: dict | None = None
+    rich_document: dict | None = None
     blocks: list[PracticeBlockOut] = []
 
 
@@ -81,6 +83,7 @@ class PracticeResponse(BaseModel):
     grade: str | None = None
     status: str
     question_count: int = 0
+    is_baseline: bool = False
     created_at: datetime
     updated_at: datetime | None = None
     page_config: dict | None = None

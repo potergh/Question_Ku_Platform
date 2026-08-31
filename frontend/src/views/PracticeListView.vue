@@ -13,6 +13,7 @@
       <el-card v-for="p in practices" :key="p.id" class="practice-card" shadow="hover" @click="openDetail(p)">
         <div class="card-title">
           <span>{{ p.title }}</span>
+          <el-tag v-if="p.is_baseline" size="small" type="warning">基线样本</el-tag>
           <el-tag size="small" :type="p.status === 'exported' ? 'success' : 'info'">{{ p.status === 'exported' ? '已导出' : '草稿' }}</el-tag>
         </div>
         <div class="card-meta">
@@ -112,7 +113,10 @@ const doRename = async () => {
 }
 
 const remove = async (p) => {
-  await ElMessageBox.confirm(`确定删除练习“${p.title}”？删除后不可恢复。`, '提示', { type: 'warning' })
+  const warn = p.is_baseline
+    ? `“${p.title}”是基线样本，删除后需重新构建基线。确定删除？`
+    : `确定删除练习“${p.title}”？删除后不可恢复。`
+  await ElMessageBox.confirm(warn, '提示', { type: 'warning' })
   await axios.delete(`/api/practices/${p.id}`)
   ElMessage.success('已删除')
   await load()

@@ -78,3 +78,48 @@ async def test_create_practice_groups_by_type(test_db, tmp_path, monkeypatch):
         assert "asset://practice/" in choice_pq.content_snapshot
         assets = list(practice_service.practice_assets_dir(practice.id).glob("*.webp"))
         assert len(assets) == 2
+
+
+async def test_create_assigns_consecutive_numbers(test_db, tmp_path, monkeypatch):
+    """创建时即连续编号：不保留题库原卷号（用户决策 2026-08-30）。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    q_choice = await _make_source_with_figure(test_db, tmp_path)
+    async with test_db() as db:
+        q_choice = await db.get(Question, q_choice.id)
+        q_choice.question_number = 7   # 故意不连续的原卷号
+        q_fill = Question(
+            source_id=q_choice.source_id, source_question_id="Q2", question_number=3,
+            question_type="fill_blank", content="填空题干",
+        )
+        db.add(q_fill)
+        await db.commit()
+        await db.refresh(q_fill)
+        await db.refresh(q_choice)   # updated_at 等服务端字段刷新，避免快照时懒加载
+        practice = await practice_service.create_practice_from_questions(
+            db, title="编号测试", subtitle=None, subject=None, grade=None,
+            questions=[q_choice, q_fill],
+        )
+        nums = [pq.question_number for s in practice.sections for pq in s.questions]
+        assert nums == [1, 2]
+
+
+async def test_content_ocr_assets_ref_migrated_at_creation(test_db, tmp_path, monkeypatch):
+    """题干里 /api/ocr-assets/… 形式的引用也在创建时迁入练习资产（否则渲染成 Markdown 文本）。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    q = await _make_source_with_figure(test_db, tmp_path)
+    async with test_db() as db:
+        q = await db.get(Question, q.id)
+        q.content = f"题干 ![figure](/api/ocr-assets/{q.source_id}/figures/test_fig.webp) 结尾"
+        await db.commit()
+        await db.refresh(q)
+        practice = await practice_service.create_practice_from_questions(
+            db, title="引用测试", subtitle=None, subject=None, grade=None, questions=[q],
+        )
+        pq = practice.sections[0].questions[0]
+        assert "asset://practice/" in pq.content_snapshot
+        assert "/api/ocr-assets/" not in pq.content_snapshot
+        assert "/figures/test_fig.webp" not in pq.content_snapshot
+        assets = list(practice_service.practice_assets_dir(practice.id).glob("*_test_fig.webp"))
+        assert len(assets) == 1

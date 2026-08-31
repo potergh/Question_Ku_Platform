@@ -2,7 +2,7 @@
   <div class="editor-page">
     <div class="editor-header">
       <div class="header-left">
-        <el-button text @click="$router.push('/practices')">&larr; 返回列表</el-button>
+        <el-button text @click="goBack">&larr; 返回列表</el-button>
         <b>{{ practice?.title || '加载中…' }}</b>
         <el-tag v-if="practice?.grade" size="small">{{ practice.grade }}</el-tag>
         <span class="qcount">{{ practice?.question_count || 0 }} 题</span>
@@ -43,7 +43,7 @@
             <span class="q-label">{{ q.question_number }}.
               <el-tag v-if="q.is_modified" size="small" type="warning">改</el-tag>
             </span>
-            <span class="q-preview">{{ (q.content || '').slice(0, 20) }}</span>
+            <span class="q-preview">{{ treePreview(q.content) }}</span>
             <span class="q-ops" @click.stop>
               <el-button size="small" text @click="moveUp(s, q)">↑</el-button>
               <el-button size="small" text @click="moveDown(s, q)">↓</el-button>
@@ -55,7 +55,7 @@
         <el-empty v-if="!practice?.sections?.length" description="暂无题目" :image-size="60" />
       </div>
 
-      <!-- 中：块编辑区 -->
+      <!-- 中：单题所见即所得编辑区（阶段 1） -->
       <div class="edit-panel">
         <el-empty v-if="!selected" description="从左侧选择一道题开始编辑" />
         <div v-else class="question-editor">
@@ -70,56 +70,20 @@
             </el-select>
             <el-input-number v-model="selected.score" size="small" :min="0" :precision="1" placeholder="分值" controls-position="right" style="width:110px" @change="updateMeta" />
             <span class="flex-gap" />
+            <el-button size="small" @click="openImagePicker"><el-icon><Picture /></el-icon> 插入图片</el-button>
             <el-button size="small" @click="restoreQuestion"><el-icon><RefreshLeft /></el-icon> 恢复题库版本</el-button>
           </div>
 
-          <div v-for="b in selected.blocks" :key="b.id" class="qe-block">
-            <div class="block-tools">
-              <el-tag size="small" type="info">{{ BLOCK_LABEL[b.block_type] }}</el-tag>
-              <el-button size="small" text @click="moveBlock(b, -1)">↑</el-button>
-              <el-button size="small" text @click="moveBlock(b, 1)">↓</el-button>
-              <template v-if="b.block_type === 'text'">
-                <el-button size="small" text @click="insertTextAfter(b)">+文字</el-button>
-              </template>
-              <template v-if="b.block_type === 'image'">
-                <el-select v-model="b.style.align" size="small" style="width:88px" @change="saveStyle(b)">
-                  <el-option label="左对齐" value="left" /><el-option label="居中" value="center" /><el-option label="右对齐" value="right" />
-                </el-select>
-                <el-select :model-value="WIDTH_PRESET_MAP[b.style.width] || 'custom'" size="small" style="width:96px" @change="v => applyWidth(b, v)">
-                  <el-option v-for="w in WIDTH_PRESETS" :key="w.value" :label="w.label" :value="w.value" />
-                  <el-option label="自定义" value="custom" />
-                </el-select>
-                <el-input-number v-if="WIDTH_PRESET_MAP[b.style.width] === undefined" v-model="customWidth" size="small" :min="10" :max="100" style="width:96px" @change="v => { b.style.width = v + '%'; saveStyle(b) }" />
-              </template>
-              <template v-if="b.block_type === 'answer_space'">
-                <el-select :model-value="b.style.rows" size="small" style="width:104px" @change="v => { b.style.rows = Number(v); saveStyle(b) }">
-                  <el-option label="无留白" :value="0" /><el-option label="小（2 行）" :value="2" /><el-option label="中（4 行）" :value="4" /><el-option label="大（8 行）" :value="8" /><el-option label="超大（12 行）" :value="12" />
-                </el-select>
-              </template>
-              <el-button size="small" text type="danger" @click="deleteBlock(b)">删除</el-button>
-            </div>
-
-            <div v-if="b.block_type === 'text'">
-              <el-input type="textarea" :autosize="{ minRows: 2 }" v-model="b.content" @change="saveText(b)" />
-            </div>
-            <div v-else-if="b.block_type === 'image'" class="img-block" :style="{ textAlign: (b.style && b.style.align) || 'center' }">
-              <img :src="b.content" :style="{ width: widthCss(b) }" />
-            </div>
-            <div v-else-if="b.block_type === 'options'" class="options-block">
-              <div v-for="(opt, oi) in (b.content || [])" :key="oi" class="option-row">
-                <el-input v-model="opt.label" style="width:56px" size="small" @change="saveOptions(b)" />
-                <el-input v-model="opt.content" size="small" @change="saveOptions(b)" />
-                <el-button size="small" text type="danger" @click="removeOption(b, oi)">✖</el-button>
-              </div>
-              <el-button size="small" @click="addOption(b)">+ 选项</el-button>
-            </div>
-            <div v-else-if="b.block_type === 'answer_space'" class="space-block">答题留白 {{ (b.style && b.style.rows) || 0 }} 行</div>
-          </div>
-
-          <div class="qe-actions">
-            <el-button size="small" @click="insertTextAfter(null)">+ 文字块</el-button>
-            <el-button size="small" @click="openImagePicker">+ 图片块</el-button>
-          </div>
+          <!-- 题号由系统管理不入正文；整题一个连续画布（题干/图/选项/留白） -->
+          <QuestionRichEditor
+            :key="selected.id"
+            ref="questionRichEditorRef"
+            :doc="selected.rich_document"
+            :practice-id="practiceId"
+            :question-id="selected.id"
+            :default-style="practiceDefaultStyle"
+            @saved="onDocSaved"
+            @request-replace-image="openReplacePicker" />
         </div>
       </div>
 
@@ -220,6 +184,22 @@
         <el-form-item label="页码"><el-switch v-model="settingsForm.showPageNumber" /></el-form-item>
         <el-form-item label="显示分值"><el-switch v-model="settingsForm.showScore" /></el-form-item>
         <el-form-item label="显示总分"><el-switch v-model="settingsForm.showTotalScore" /></el-form-item>
+        <el-divider content-position="left">默认正文样式（未局部覆盖的内容跟随）</el-divider>
+        <el-form-item label="默认字体">
+          <el-select v-model="settingsForm.defaultFont" style="width:160px">
+            <el-option v-for="f in FONT_NAMES" :key="f" :label="f" :value="f" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="默认字号">
+          <el-select v-model="settingsForm.defaultFontSize" style="width:160px">
+            <el-option v-for="s in FONT_SIZES" :key="s.value" :label="s.label" :value="s.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="默认行距">
+          <el-select v-model="settingsForm.defaultLineHeight" style="width:160px">
+            <el-option v-for="lh in LINE_HEIGHTS" :key="lh" :label="`${lh} 倍`" :value="lh" />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showSettings = false">取消</el-button>
@@ -228,7 +208,7 @@
     </el-dialog>
 
     <!-- 插入图片 -->
-    <el-dialog v-model="showImagePicker" title="插入图片" width="420px">
+    <el-dialog v-model="showImagePicker" :title="replaceMode ? '替换图片' : '插入图片'" width="420px">
       <el-empty v-if="!assets.length" description="该练习暂无图片资产" :image-size="60" />
       <div v-else class="asset-grid">
         <div v-for="a in assets" :key="a" class="asset-item" @click="insertImage(a)">
@@ -258,6 +238,8 @@ import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { QUESTION_TYPE_MAP } from '../utils/questionTypes'
+import QuestionRichEditor from '../components/richeditor/QuestionRichEditor.vue'
+import { FONT_NAMES, FONT_SIZES, LINE_HEIGHTS, DEFAULT_STYLE } from '../components/richeditor/typography'
 
 const route = useRoute()
 const router = useRouter()
@@ -273,7 +255,14 @@ const moveTarget = ref('')
 const moveQuestionTarget = ref(null)
 const showSettings = ref(false)
 const settingsForm = reactive({ title: '', subtitle: '', showInfoBar: true,
-  marginPreset: 'normal', showPageNumber: true, showScore: false, showTotalScore: false })
+  marginPreset: 'normal', showPageNumber: true, showScore: false, showTotalScore: false,
+  defaultFont: DEFAULT_STYLE.font_family, defaultFontSize: DEFAULT_STYLE.font_size,
+  defaultLineHeight: DEFAULT_STYLE.line_height })
+
+// 练习默认样式：供编辑器画布跟随（后端渲染同样读 page_config.default_style）
+const practiceDefaultStyle = computed(() => ({
+  ...DEFAULT_STYLE, ...(practice.value?.page_config?.default_style || {}),
+}))
 
 const load = async () => {
   const res = await axios.get(`/api/practices/${practiceId}/detail`)
@@ -281,9 +270,11 @@ const load = async () => {
   schedulePreview()
 }
 
-const selectQuestion = (s, q) => { selected.value = q; selectedSection.value = s; normalizeBlocks() }
-const normalizeBlocks = () => {  // 旧块可能无 style，前端统一补空对象避免模板报错
-  for (const b of (selected.value?.blocks || [])) { if (!b.style) b.style = {} }
+const selectQuestion = async (s, q) => {
+  if (selected.value && selected.value.id !== q.id) {
+    await questionRichEditorRef.value?.flush?.()   // 切题前先把当前题落盘（不丢修改）
+  }
+  selected.value = q; selectedSection.value = s
 }
 const refresh = async () => { await load(); selected.value = null }
 
@@ -347,6 +338,7 @@ const removeSection = async (s) => {
 const moveUp = async (s, q) => {
   const idx = s.questions.findIndex(x => x.id === q.id)
   if (idx <= 0) return
+  await questionRichEditorRef.value?.flush?.()
   await axios.put(`/api/practices/${practiceId}/questions/${q.id}/move`,
     { target_section_id: s.id, target_position: s.questions[idx - 1].position })
   await refresh()
@@ -354,6 +346,7 @@ const moveUp = async (s, q) => {
 const moveDown = async (s, q) => {
   const idx = s.questions.findIndex(x => x.id === q.id)
   if (idx < 0 || idx >= s.questions.length - 1) return
+  await questionRichEditorRef.value?.flush?.()
   await axios.put(`/api/practices/${practiceId}/questions/${q.id}/move`,
     { target_section_id: s.id, target_position: s.questions[idx + 1].position })
   await refresh()
@@ -368,6 +361,7 @@ const doMove = async () => {
 }
 const removeQuestion = async (q) => {
   await ElMessageBox.confirm(`删除第 ${q.question_number} 题？删除后不可恢复。`, '提示', { type: 'warning' })
+  await questionRichEditorRef.value?.flush?.()
   await axios.delete(`/api/practices/${practiceId}/questions/${q.id}`)
   await refresh()
 }
@@ -399,6 +393,10 @@ const openSettings = () => {
   settingsForm.showPageNumber = practice.value.page_config?.show_page_number ?? true
   settingsForm.showScore = practice.value.page_config?.show_score ?? false
   settingsForm.showTotalScore = practice.value.page_config?.show_total_score ?? false
+  const ds = practice.value.page_config?.default_style || {}
+  settingsForm.defaultFont = ds.font_family ?? DEFAULT_STYLE.font_family
+  settingsForm.defaultFontSize = ds.font_size ?? DEFAULT_STYLE.font_size
+  settingsForm.defaultLineHeight = ds.line_height ?? DEFAULT_STYLE.line_height
   showSettings.value = true
 }
 const saveSettings = async () => {
@@ -410,113 +408,72 @@ const saveSettings = async () => {
       margin_preset: settingsForm.marginPreset,
       show_page_number: settingsForm.showPageNumber,
       show_score: settingsForm.showScore,
-      show_total_score: settingsForm.showTotalScore },
+      show_total_score: settingsForm.showTotalScore,
+      default_style: {
+        font_family: settingsForm.defaultFont,
+        font_size: settingsForm.defaultFontSize,
+        line_height: settingsForm.defaultLineHeight,
+      } },
   })
   showSettings.value = false
   ElMessage.success('已保存')
   await load()
 }
 
-/* ---- 块编辑区 ---- */
-const BLOCK_LABEL = { text: '文字', image: '图片', options: '选项', answer_space: '留白' }
-const WIDTH_PRESETS = [
-  { label: '适应内容', value: 'fit' },
-  { label: '50%', value: '50%' },
-  { label: '80%', value: '80%' },
-  { label: '100%', value: '100%' },
-]
-const WIDTH_PRESET_MAP = Object.fromEntries(WIDTH_PRESETS.map(w => [w.value, w.value]))
+/* ---- 单题富文本编辑（阶段 1：编辑器为新真源，保存反推旧块/快照） ---- */
+const questionRichEditorRef = ref(null)
 
 const assets = ref([])
 const showImagePicker = ref(false)
-const customWidth = ref(60)
+const replaceMode = ref(false)   // true = 替换模式（保留宽高/对齐）
 
-const widthCss = (b) => {
-  const w = b.style && b.style.width
-  if (!w || w === 'fit') return 'auto'
-  if (typeof w === 'number') return w + '%'
-  return w
-}
-const ensureStyle = (b) => { if (!b.style) b.style = {}; return b.style }
+// 左树预览：剔除 Markdown 图包装与公式包装，只看正文概要
+const treePreview = (c) => (c || '')
+  .replace(/!\[[^\]]*\]\([^)]*\)/g, '[图]').replace(/\$\$[^$]*\$\$|\$[^$\n]*\$/g, '[公式]').slice(0, 24)
 
-/* 块操作：响应体含 { question, blocks }，就地更新当前选中题 */
-const applyBlockResp = async (res) => {
-  const { question, blocks } = res.data
-  selected.value = question
-  selected.value.blocks = blocks
-  await load()  // 同步左树编号/已修改标记；之后把 selected 重新指向刷新后的同一题（含完整块）
-  const sec = practice.value.sections.find(s => s.questions.some(q => q.id === selected.value.id))
-  if (sec) { selectedSection.value = sec; selected.value = sec.questions.find(q => q.id === selected.value.id) }
-  normalizeBlocks()
+// 保存成功：就地刷新左树“改”标记/预览文本/富文本文档（避免切回时用旧文档覆盖），延迟刷新右侧预览（不在打字时重复渲染）
+const onDocSaved = (payload) => {
+  const q = payload.question
+  const sec = (practice.value?.sections || []).find(s => s.questions.some(x => x.id === q.id))
+  if (!sec) return
+  const target = sec.questions.find(x => x.id === q.id)
+  target.is_modified = q.is_modified
+  target.content = q.content
+  target.rich_document = q.rich_document
+  schedulePreview()
 }
 
-const saveText = async (b) => {
-  const res = await axios.put(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks/${b.id}`, { content: b.content })
-  await applyBlockResp(res)
-}
-const saveStyle = async (b) => {
-  const res = await axios.put(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks/${b.id}`, { style: b.style })
-  await applyBlockResp(res)
-}
-const applyWidth = (b, v) => {
-  ensureStyle(b)
-  if (v !== 'custom') { b.style.width = v; saveStyle(b) }
-}
-const saveOptions = async (b) => {
-  const res = await axios.put(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks/${b.id}`, { content: b.content })
-  await applyBlockResp(res)
-}
-const addOption = (b) => {
-  const labels = 'ABCDEFGHIJKLMN'
-  b.content = b.content || []
-  b.content.push({ label: labels[b.content.length] || '?', content: '' })
-  saveOptions(b)
-}
-const removeOption = (b, oi) => { b.content.splice(oi, 1); saveOptions(b) }
-
-const moveBlock = async (b, delta) => {
-  const ids = selected.value.blocks.map(x => x.id)
-  const i = ids.indexOf(b.id)
-  const j = i + delta
-  if (i < 0 || j < 0 || j >= ids.length) return
-  ;[ids[i], ids[j]] = [ids[j], ids[i]]
-  const res = await axios.put(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks/reorder`, { block_ids: ids })
-  await applyBlockResp(res)
-}
-const deleteBlock = async (b) => {
-  await ElMessageBox.confirm('删除该块？其内容将从练习快照中移除（题库原题不受影响）。', '提示', { type: 'warning' })
-  const res = await axios.delete(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks/${b.id}`)
-  await applyBlockResp(res)
-}
-const insertTextAfter = async (b) => {
-  const res = await axios.post(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks`,
-    { block_type: 'text', content: '' })
-  await applyBlockResp(res)
-  if (b) {
-    // 移到目标块之后：重建顺序数组再调 reorder（b 来自响应前的旧引用，按 id 匹配）
-    const blocks = selected.value.blocks
-    const nb = blocks[blocks.length - 1]
-    const ids = blocks.filter(x => x.id !== nb.id).map(x => x.id)
-    ids.splice(ids.indexOf(b.id) + 1, 0, nb.id)
-    const res2 = await axios.put(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks/reorder`, { block_ids: ids })
-    await applyBlockResp(res2)
-  }
-}
 const openImagePicker = async () => {
   const res = await axios.get(`/api/practices/${practiceId}/assets-list`)
   assets.value = res.data.assets
+  replaceMode.value = false
   showImagePicker.value = true
 }
-const insertImage = async (name) => {
-  const res = await axios.post(`/api/practices/${practiceId}/questions/${selected.value.id}/blocks`,
-    { block_type: 'image', content: `asset://practice/${name}`, style: { align: 'center', width: 'fit' } })
-  await applyBlockResp(res)
+const openReplacePicker = async () => {
+  const res = await axios.get(`/api/practices/${practiceId}/assets-list`)
+  assets.value = res.data.assets
+  replaceMode.value = true
+  showImagePicker.value = true
+}
+const insertImage = (name) => {
+  const src = `asset://practice/${name}`
+  if (replaceMode.value) {
+    questionRichEditorRef.value?.replaceImageBlock?.(src)
+  } else {
+    questionRichEditorRef.value?.insertImageBlock?.(src)
+  }
+  replaceMode.value = false
   showImagePicker.value = false
 }
 const restoreQuestion = async () => {
+  await questionRichEditorRef.value?.flush?.()
   await ElMessageBox.confirm('恢复为题库原始内容？当前练习中对该题的所有修改将丢失（题库原题不受影响）。', '提示', { type: 'warning' })
   const res = await axios.post(`/api/practices/${practiceId}/questions/${selected.value.id}/restore`)
-  await applyBlockResp(res)
+  selected.value = res.data.question
+  await load()   // 同步左树；随后把 selected 指回刷新后的同一题（含重建的富文本文档）
+  const sec = practice.value.sections.find(s => s.questions.some(q => q.id === res.data.question.id))
+  if (sec) { selectedSection.value = sec; selected.value = sec.questions.find(q => q.id === res.data.question.id) }
+  schedulePreview()
   ElMessage.success('已恢复为题库原始内容')
 }
 const updateMeta = async () => {
@@ -526,6 +483,10 @@ const updateMeta = async () => {
     score: selected.value.score ?? null,
   })
   await load()
+}
+const goBack = async () => {
+  await questionRichEditorRef.value?.flush?.()
+  router.push('/practices')
 }
 
 /* ---- 预览与导出（阶段三） ---- */
@@ -597,7 +558,16 @@ const exportFile = async (fmt) => {
     a.download = `${practice.value.title || '练习'}.${fmt}`
     a.click()
     URL.revokeObjectURL(url)
-    ElMessage.success('导出成功')
+    // Word 公式降级为图片：后端经响应头明确列出（不静默丢失，阶段 3）
+    const degraded = res.headers['x-formula-degraded']
+    if (fmt === 'docx' && degraded) {
+      ElMessage({
+        type: 'warning', duration: 8000,
+        message: `导出成功，但以下公式无法转为 Word 原生公式，已降级为图片：${decodeURIComponent(degraded)}`,
+      })
+    } else {
+      ElMessage.success('导出成功')
+    }
     await load()
   } catch { ElMessage.error('导出失败') }
 }

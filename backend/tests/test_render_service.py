@@ -51,6 +51,16 @@ async def test_build_html_contains_structure(client, test_db, tmp_path):
     assert "katex" in html                     # KaTeX 标签
 
 
+async def test_answer_space_blank_no_lines(client, test_db, tmp_path):
+    """答题留白只留空白，不画横线（用户决策 2026-08-30）。"""
+    detail = await _full_practice(client, test_db, tmp_path)
+    practice = await _load_with_blocks(test_db, detail["id"])
+    html = build_practice_html(practice, detail["id"])
+    assert "answer-space" in html
+    assert "space-line" in html
+    assert "border-bottom" not in html
+
+
 async def test_build_html_respects_page_config(client, test_db, tmp_path):
     detail = await _full_practice(client, test_db, tmp_path)
     pid = detail["id"]
@@ -95,7 +105,7 @@ async def test_prefix_inline_and_img_row(client, test_db, tmp_path):
     assert "q-img-row" in html                                       # 连续两图并排
     assert html.count('<div class="q-img-cell">') == 2
 
-    doc = Document(io.BytesIO(docx_export.build_docx(p, pid)))
+    doc = Document(io.BytesIO(docx_export.build_docx(p, pid)[0]))
     texts = [para.text for para in doc.paragraphs]
     assert "1. 题干首行" in texts                                    # Word 同样同行（且已重排）
     assert any(len(t.rows[0].cells) == 2 for t in doc.tables)        # 两图用单行表格并排
@@ -126,7 +136,7 @@ async def test_option_images_migrate_and_render(client, test_db, tmp_path):
     p = await _load_with_blocks(test_db, pid)
     html = build_practice_html(p, pid)
     assert "![" not in html and "max-height:3.4em" in html                     # HTML 内联 <img>
-    doc = Document(io.BytesIO(docx_export.build_docx(p, pid)))
+    doc = Document(io.BytesIO(docx_export.build_docx(p, pid)[0]))
     opt_paras = [para for para in doc.paragraphs if para.text.startswith("A.")]
     assert opt_paras and any("graphic" in r._r.xml for r in opt_paras[0].runs)  # Word 行内图
     assert "![figure]" not in "".join(para.text for para in doc.paragraphs)
@@ -140,7 +150,7 @@ async def test_docx_math_omml_and_fonts(client, test_db, tmp_path):
     pid = practice["id"]
     await client.get(f"/api/practices/{pid}/detail")
     p = await _load_with_blocks(test_db, pid)
-    doc = Document(io.BytesIO(docx_export.build_docx(p, pid)))
+    doc = Document(io.BytesIO(docx_export.build_docx(p, pid)[0]))
     xml = doc.element.xml
     assert "oMath" in xml                        # 公式内嵌为 OMML 对象
     assert "oMathPara" in xml                    # $$…$$ 为行间公式
@@ -164,7 +174,7 @@ async def test_fit_width_capped(client, test_db, tmp_path):
     pid = practice["id"]
     await client.get(f"/api/practices/{pid}/detail")
     p = await _load_with_blocks(test_db, pid)
-    doc = Document(io.BytesIO(docx_export.build_docx(p, pid)))
+    doc = Document(io.BytesIO(docx_export.build_docx(p, pid)[0]))
     shape = doc.inline_shapes[0]
     content_width = docx_export.A4_W - 2 * docx_export.Cm(2.5)   # 默认 normal 边距 25mm
     assert shape.width == int(content_width / 2)                   # 恰好封顶到 50%

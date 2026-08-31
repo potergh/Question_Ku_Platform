@@ -17,6 +17,7 @@ from app.services.practice_service import (
     migrate_option_refs,
     practice_assets_dir,
 )
+from app.services.rich_document import blocks_from_doc, serialize, sync_rich_document
 from app.utils.question_types import map_question_type
 
 # 题型英文名 → 默认答题留白行数（决策 6：默认值由题型决定，单题可覆盖）
@@ -73,6 +74,7 @@ async def materialize_blocks(db: AsyncSession, pq: PracticeQuestion) -> list[Pra
     await db.flush()
     for b in blocks:
         await db.refresh(b)
+    sync_rich_document(pq, blocks)   # 阶段 0 双写桥：物化同时生成新富文本文档（不动旧字段）
     return blocks
 
 
@@ -99,7 +101,28 @@ async def rebuild_content_from_blocks(db: AsyncSession, pq: PracticeQuestion) ->
     if options is not None:
         pq.options_snapshot = options
     pq.is_modified = True
+    sync_rich_document(pq, blocks)   # 阶段 0 双写桥：块变更后同步新富文本文档（只写新字段）
     return pq.content_snapshot
+
+
+async def apply_doc_to_question(db: AsyncSession, pq: PracticeQuestion, doc: dict) -> None:
+    """阶段 1 反向双写：编辑器文档为新真源，重建旧块/快照（只 flush，提交留给调用方）。
+    rich_document 存编辑器原文（保留 marks 等格式），旧字段由文档反推（导出兼容）。"""
+    await db.execute(delete(PracticeContentBlock)
+                     .where(PracticeContentBlock.practice_question_id == pq.id))
+    await db.flush()
+    blocks = [PracticeContentBlock(
+        practice_question_id=pq.id, block_type=b["block_type"], position=pos,
+        content=b["content"], style_config=b["style"],
+    ) for pos, b in enumerate(blocks_from_doc(doc))]
+    db.add_all(blocks)
+    await db.flush()
+    for b in blocks:
+        await db.refresh(b)
+    await rebuild_content_from_blocks(db, pq)   # 内部会由块同步 rich_document（旧→新方向）
+    # 再以编辑器文档覆盖：保留 marks 等块表达不了的格式（新真源）
+    pq.rich_document = serialize(doc)
+    pq.doc_version = 1
 
 
 async def restore_question_from_source(db: AsyncSession, pq: PracticeQuestion) -> PracticeQuestion | None:

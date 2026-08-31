@@ -19,6 +19,12 @@ class Practice(Base):
     grade: Mapped[str | None] = mapped_column(String(20), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="draft")  # draft / exported
     page_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 阶段 0 新文档结构迁移状态：pending（待迁移）/ done / failed / native（新建即用新结构）
+    migration_status: Mapped[str] = mapped_column(String(20), default="pending")
+    migration_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    migrated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # 基线样本标记（用户决策 2026-08-30：留在列表但加标记，不隐藏）
+    is_baseline: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, onupdate=func.now())
 
@@ -69,6 +75,10 @@ class PracticeQuestion(Base):
     source_version: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_modified: Mapped[bool] = mapped_column(Boolean, default=False)
     layout_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 阶段 0 新富文本文档（Tiptap 风格 JSON 字符串）；0 = 未生成，1 = schema v1。
+    # 旧字段 content_snapshot / options_snapshot 在迁移稳定前保留，支持回退读取。
+    rich_document: Mapped[str | None] = mapped_column(Text, nullable=True)
+    doc_version: Mapped[int] = mapped_column(Integer, default=0)
 
     section = relationship("PracticeSection", back_populates="questions")
     blocks = relationship(

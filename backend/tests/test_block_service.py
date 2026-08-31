@@ -78,3 +78,47 @@ async def test_restore_from_source(test_db, tmp_path, monkeypatch):
         assert "题干第一段" in restored.content_snapshot
         # restored 由服务内部以 selectinload 重新加载，可安全访问 blocks
         assert [b.block_type for b in restored.blocks] == ["text", "image", "text", "options", "answer_space"]
+
+
+async def test_migrate_option_blocks_syncs_snapshot_and_doc(test_db, tmp_path, monkeypatch):
+    """旧选项块外部引用迁入后，选项快照与新富文本文档同步更新（不残留旧引用）。"""
+    import json
+    practice = await _make_practice(test_db, tmp_path, monkeypatch)
+    async with test_db() as db:
+        source = (await db.execute(select(Source))).scalars().first()
+        pq = (await db.execute(
+            select(PracticeQuestion).options(selectinload_blocks())
+        )).scalars().first()
+        blocks = await block_service.materialize_blocks(db, pq)
+        # 模拟旧数据：选项块里还是 /api/ocr-assets 外部引用
+        opt_block = next(b for b in blocks if b.block_type == "options")
+        opt_block.content = json.dumps(
+            [{"label": "A", "content": f"![figure](/api/ocr-assets/{source.id}/figures/f.webp)"},
+             {"label": "B", "content": "y"}], ensure_ascii=False)
+        await db.commit()
+        # 物化后集合缓存已过期，重新加载（与详情接口同路径）
+        pq = (await db.execute(
+            select(PracticeQuestion).options(selectinload_blocks())
+            .execution_options(populate_existing=True)
+        )).scalars().first()
+
+        changed = await practice_service.migrate_question_option_blocks(db, practice.id, pq)
+        await db.commit()
+        assert changed
+        opt_block = next(b for b in pq.blocks if b.block_type == "options")
+        assert "asset://practice/" in opt_block.content
+        assert "/api/ocr-assets/" not in opt_block.content
+        # 选项快照同步：不再残留外部引用（渲染/导出的回退路径也干净）
+        assert "/api/ocr-assets/" not in json.dumps(pq.options_snapshot, ensure_ascii=False)
+        # 新富文本文档同步：选项图已是练习内引用
+        doc = json.loads(pq.rich_document)
+        group = next(n for n in doc["content"] if n["type"] == "optionGroup")
+        img = next(n for n in group["content"][0]["content"] if n["type"] == "inlineImage")
+        assert img["attrs"]["src"].startswith("asset://practice/")
+        # 幂等：再跑一次无变更（不重复复制）
+        assert not await practice_service.migrate_question_option_blocks(db, practice.id, pq)
+
+
+def selectinload_blocks():
+    from sqlalchemy.orm import selectinload
+    return selectinload(PracticeQuestion.blocks)

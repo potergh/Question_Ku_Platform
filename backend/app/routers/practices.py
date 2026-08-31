@@ -9,7 +9,7 @@ import shutil
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func, delete
@@ -29,6 +29,7 @@ from app.services import practice_service
 from app.services import block_service
 from app.services import docx_export
 from app.services import preview_service, render_service
+from app.services.rich_document import validate_doc
 
 router = APIRouter()
 
@@ -68,6 +69,12 @@ def _block_out(b: PracticeContentBlock, practice_id: str) -> dict:
 
 
 def _question_out(practice_id: str, pq: PracticeQuestion) -> PracticeQuestionOut:
+    rich_doc = None
+    if pq.rich_document:
+        try:
+            rich_doc = json.loads(pq.rich_document)
+        except (TypeError, ValueError):
+            rich_doc = None
     return PracticeQuestionOut(
         id=pq.id, position=pq.position, source_question_id=pq.source_question_id,
         question_number=pq.question_number, question_type=pq.question_type,
@@ -75,6 +82,7 @@ def _question_out(practice_id: str, pq: PracticeQuestion) -> PracticeQuestionOut
         content=practice_service.resolve_practice_asset_urls(pq.content_snapshot, practice_id),
         options=pq.options_snapshot, is_modified=pq.is_modified,
         layout_config=pq.layout_config,
+        rich_document=rich_doc,
         blocks=[_block_out(b, practice_id)
                 for b in sorted(pq.blocks, key=lambda b: b.position)],
     )
@@ -92,7 +100,8 @@ def _practice_response(practice: Practice) -> PracticeResponse:
     return PracticeResponse(
         id=practice.id, title=practice.title, subtitle=practice.subtitle,
         subject=practice.subject, grade=practice.grade, status=practice.status,
-        question_count=total, created_at=practice.created_at, updated_at=practice.updated_at,
+        question_count=total, is_baseline=practice.is_baseline,
+        created_at=practice.created_at, updated_at=practice.updated_at,
         page_config=practice.page_config, sections=sections,
     )
 
@@ -165,7 +174,7 @@ async def list_practices(db: AsyncSession = Depends(get_db)):
         )
         briefs.append(PracticeBrief(
             id=p.id, title=p.title, subtitle=p.subtitle, subject=p.subject, grade=p.grade,
-            status=p.status, question_count=cnt.scalar() or 0,
+            status=p.status, question_count=cnt.scalar() or 0, is_baseline=p.is_baseline,
             created_at=p.created_at, updated_at=p.updated_at,
         ))
     return PracticeListResponse(practices=briefs, total=len(briefs))
@@ -271,6 +280,20 @@ async def list_practice_assets(practice_id: str):
     return {"assets": names}
 
 
+@router.post("/api/practices/{practice_id}/assets/upload")
+async def upload_practice_asset(practice_id: str, file: UploadFile = File(...)):
+    """Upload a new image to the practice assets directory."""
+    import uuid
+    from pathlib import Path
+    assets_dir = practice_service.practice_assets_dir(practice_id)
+    suffix = Path(file.filename or "img.png").suffix.lower() or ".png"
+    name = f"{uuid.uuid4().hex[:8]}{suffix}"
+    dest = assets_dir / name
+    content = await file.read()
+    dest.write_bytes(content)
+    return {"name": name}
+
+
 @router.post("/api/practices/{practice_id}/questions/{pq_id}/blocks")
 async def add_block(practice_id: str, pq_id: str, req: BlockCreateRequest,
                     db: AsyncSession = Depends(get_db)):
@@ -345,6 +368,23 @@ async def delete_block(practice_id: str, pq_id: str, block_id: str,
     for pos, b in enumerate(remaining):
         b.position = pos
     await block_service.rebuild_content_from_blocks(db, pq)
+    await db.commit()
+    return await _question_payload(db, pq)
+
+
+class DocumentUpdateRequest(BaseModel):
+    document: dict
+
+
+@router.put("/api/practices/{practice_id}/questions/{pq_id}/document")
+async def save_question_document(practice_id: str, pq_id: str, req: DocumentUpdateRequest,
+                                 db: AsyncSession = Depends(get_db)):
+    """阶段 1：保存单题富文本文档（新真源），反推重建旧块/快照（导出兼容）。"""
+    pq = await _load_pq(db, practice_id, pq_id)
+    errors = validate_doc(req.document)
+    if errors:
+        raise HTTPException(422, "文档格式非法：" + "；".join(errors[:5]))
+    await block_service.apply_doc_to_question(db, pq, req.document)
     await db.commit()
     return await _question_payload(db, pq)
 
@@ -628,14 +668,17 @@ def _export_filename(title: str, ext: str) -> str:
 @router.get("/api/practices/{practice_id}/export/docx")
 async def export_docx(practice_id: str, db: AsyncSession = Depends(get_db)):
     practice = await _load_for_render(db, practice_id)
-    data = await asyncio.to_thread(docx_export.build_docx, practice, practice_id)
+    data, degraded = await asyncio.to_thread(docx_export.build_docx, practice, practice_id)
     practice.status = "exported"
     await db.commit()
+    headers = {"Content-Disposition":
+               f"attachment; filename*=utf-8''{quote(_export_filename(practice.title, 'docx'))}"}
+    if degraded:   # 公式降级为图片清单（URL 编码，前端解码后明确提示）
+        headers["X-Formula-Degraded"] = quote("; ".join(degraded), safe="")
     return StreamingResponse(
         io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition":
-                 f"attachment; filename*=utf-8''{quote(_export_filename(practice.title, 'docx'))}"},
+        headers=headers,
     )
 
 

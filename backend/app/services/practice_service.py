@@ -14,6 +14,7 @@ from app.config import settings
 from app.models import Question, Source
 from app.models.basket import SelectionBasket
 from app.models.practice import Practice, PracticeSection, PracticeQuestion
+from app.services.rich_document import sync_rich_document
 from app.utils.question_types import map_question_type
 
 ASSET_RE = re.compile(r"asset://([^\s\)]+)")
@@ -68,6 +69,9 @@ async def snapshot_question(
     source = await db.get(Source, question.source_id)
     ocr_dir = Path(source.ocr_result_path) if source and source.ocr_result_path else None
     content = _copy_referenced_assets(question.content, ocr_dir, practice_assets_dir(practice.id))
+    # /api/ocr-assets/… 形式的引用也迁入练习资产（上面只处理 asset://），
+    # 否则预览/导出时图片位置会显示 Markdown 原文
+    content = await migrate_option_refs(db, practice.id, content, ocr_dir)
 
     pq = PracticeQuestion(
         practice_id=practice.id,
@@ -196,6 +200,12 @@ async def migrate_question_option_blocks(db: AsyncSession, practice_id: str, pq)
         if opt_changed:
             b.content = json.dumps(new_opts, ensure_ascii=False)
             changed = True
+    if changed:
+        # 选项块变更后同步选项快照与新富文本文档，避免块/快照/文档不一致
+        opts = next((json.loads(b.content) for b in pq.blocks if b.block_type == "options"), None)
+        if opts is not None:
+            pq.options_snapshot = opts
+        sync_rich_document(pq, sorted(pq.blocks, key=lambda b: b.position))
     return changed
 
 
@@ -203,8 +213,9 @@ async def create_practice_from_questions(
     db: AsyncSession, title: str, subtitle: str | None, subject: str | None,
     grade: str | None, questions: list,
 ) -> Practice:
-    """按题型分组创建练习 + 小节 + 题目快照。"""
-    practice = Practice(title=title, subtitle=subtitle, subject=subject, grade=grade)
+    """按题型分组创建练习 + 小节 + 题目快照。新建练习直接进入新文档结构（native）。"""
+    practice = Practice(title=title, subtitle=subtitle, subject=subject, grade=grade,
+                        migration_status="native")
     db.add(practice)
     await db.flush()
 
@@ -215,6 +226,7 @@ async def create_practice_from_questions(
     ordered = [t for t in SECTION_TYPE_ORDER if t in groups] + [
         t for t in groups if t not in SECTION_TYPE_ORDER
     ]
+    n = 0   # 创建时即连续编号（不保留题库原卷号；用户决策 2026-08-30）
     for pos, zh_type in enumerate(ordered):
         section = PracticeSection(
             practice_id=practice.id, title=zh_type, section_type=zh_type, position=pos,
@@ -222,7 +234,9 @@ async def create_practice_from_questions(
         db.add(section)
         await db.flush()
         for i, q in enumerate(groups[zh_type]):
-            await snapshot_question(db, practice, section, q, i)
+            pq = await snapshot_question(db, practice, section, q, i)
+            n += 1
+            pq.question_number = n
 
     await db.commit()
     result = await db.execute(

@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 from app.models.practice import Practice
-from app.services import practice_service
+from app.services import doc_render, practice_service, typography
 
 MARGIN_PRESETS = {"narrow": "15mm", "normal": "25mm", "wide": "32mm"}
 
@@ -35,6 +35,7 @@ def render_settings(practice: Practice) -> dict:
         "show_page_number": cfg.get("show_page_number", True),
         "show_score": cfg.get("show_score", False),
         "show_total_score": cfg.get("show_total_score", False),
+        "default_style": typography.practice_default_style(practice),   # 阶段 2 全局默认样式
     }
 
 
@@ -120,7 +121,7 @@ def build_practice_html(practice: Practice, practice_id: str) -> str:
         head.append('<div class="info-bar">姓名：____________　班级：____________　日期：____________</div>')
 
     body = _section_bodies(practice, s)
-    return _head_css() + '<body>' + "".join(head + body) + _katex_tags() + '</body></html>'
+    return _head_css(s["default_style"]) + '<body>' + "".join(head + body) + _katex_tags() + '</body></html>'
 
 
 def _section_bodies(practice: Practice, s: dict) -> list[str]:
@@ -134,9 +135,24 @@ def _section_bodies(practice: Practice, s: dict) -> list[str]:
             prefix = f"{pq.question_number}. "
             if s["show_score"] and pq.score is not None:
                 prefix += f"（{pq.score:g} 分）"
+            doc = _parse_rich_doc(pq)
+            if doc is not None:   # 阶段 2：富文档为真源（marks/段落属性只在此路径生效）
+                out.append(f'<div class="question">{doc_render.question_html(doc, practice.id, prefix)}</div>')
+                continue
             blocks = sorted(pq.blocks, key=lambda b: b.position)
             out.append(f'<div class="question">{_blocks_html(blocks, practice.id, prefix)}</div>')
     return out
+
+
+def _parse_rich_doc(pq):
+    """题目富文档（可解析时）；无文档/解析失败返回 None → 旧块回退路径。"""
+    if not pq.rich_document:
+        return None
+    try:
+        doc = json.loads(pq.rich_document)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return doc if isinstance(doc, dict) and doc.get("type") == "doc" else None
 
 
 def _blocks_html(blocks, practice_id: str, prefix: str) -> str:
@@ -172,11 +188,15 @@ def _blocks_html(blocks, practice_id: str, prefix: str) -> str:
     return "".join(out)
 
 
-def _head_css() -> str:
+def _head_css(default_style: dict | None = None) -> str:
+    ds = default_style or typography.DEFAULT_STYLE
+    family = typography.css_font_family(ds.get("font_family"))   # 西文 TNR 在前，中文白名单字体随后
+    size = f"{ds.get('font_size', 10.5):g}pt"
+    lh = ds.get("line_height", 1.7)
     return ('<!DOCTYPE html><html><head><meta charset="utf-8">'
             '<style>'
-            'body { font-family: "Times New Roman", "SimSun", "Microsoft YaHei", serif; font-size: 10.5pt;'
-            ' line-height: 1.7; color: #000; margin: 0; }'   # 西文 TNR，中文回落宋体
+            f'body {{ font-family: {family}; font-size: {size};'
+            f' line-height: {lh}; color: #000; margin: 0; }}'
             '.p-title { text-align: center; font-size: 18pt; font-weight: bold; margin-bottom: 4px; }'
             '.p-subtitle { text-align: center; font-size: 12pt; color: #333; margin-bottom: 8px; }'
             '.p-total { text-align: center; font-size: 10.5pt; margin-bottom: 6px; }'
@@ -195,7 +215,11 @@ def _head_css() -> str:
             '.opt-label { margin-right: 4px; }'
             '.q-score { font-size: 9pt; }'
             '.answer-space { margin: 4px 0; }'
-            '.space-line { height: 1.9em; border-bottom: 1px solid #999; }'
+            'u { white-space: pre-wrap; }'   # 下划线填空位常为纯空格：防空白折叠导致下划线不可见
+            '.q-hr { border: none; border-top: 1px solid #000; margin: 6px 0; }'   # 横线（填写线/分隔线）
+            '.q-list { margin: 2px 0 2px 2em; padding: 0; }'
+            '.q-list li { margin: 1px 0; }'
+            '.space-line { height: 1.9em; }'   # 答题留白：纯空白不画横线（用户决策 2026-08-30）
             '</style></head>')
 
 
