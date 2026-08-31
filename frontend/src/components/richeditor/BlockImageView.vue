@@ -3,16 +3,14 @@
 <template>
   <node-view-wrapper as="div" class="qre-img" :class="alignCls" :style="nodeViewStyle"
     :data-layout="node.attrs.layout || 'row'"
-    :data-selected="selected || undefined"
-    @mouseenter="onEnter" @mouseleave="onLeave">
+    :data-selected="selected || undefined">
     <div class="qre-img-wrap">
       <img v-if="!loadError" ref="imgEl" :src="imgSrc" :style="imgStyle" @error="loadError = true" />
       <div v-else class="qre-img-missing">⚠ 图片缺失</div>
       <!-- 选中时显示右下角缩放手柄：并排时调整行整体高度，单图/独占时调宽度 -->
       <div v-if="selected && !loadError" class="qre-img-handle" @mousedown.stop.prevent="startResize"></div>
     </div>
-    <div ref="toolEl" v-show="hovered || selected" class="qre-img-tools" contenteditable="false" :style="toolPos"
-         @mouseenter="onToolEnter" @mouseleave="onToolLeave">
+    <div ref="toolEl" v-show="selected" class="qre-img-tools" contenteditable="false" :style="toolPos">
       <!-- 排版切换：并排 / 独占（阶段 4） -->
       <el-button size="small" text @click="toggleLayout">
         {{ (node.attrs.layout || 'row') === 'row' ? '⇋独占' : '⇆并排' }}
@@ -50,30 +48,13 @@ const props = defineProps({ node: Object, editor: Object, selected: Boolean,
 const imgEl = ref(null)
 const fileInput = ref(null)
 const loadError = ref(false)
-const hovered = ref(false)
 const toolEl = ref(null)
 const toolPos = ref({})
 
 // src 变化时重置加载错误状态
 watch(() => props.node.attrs.src, () => { loadError.value = false })
 
-// 选中即打开工具条并定位（避免仅靠 hover 在窄节点上难以触发）
-watch(() => props.selected, (v) => { if (v) { hovered.value = true; nextTick(positionTool) } })
-
-// ---------- 工具条：fixed + 视口内钳制，不被并排相邻节点/滚动容器裁剪 ----------
-// 关闭带 150ms 宽限期：工具条悬停在图片上方，鼠标移向工具条途经缝隙时不会瞬间消失
-let hideTimer = null
-const onEnter = () => { clearTimeout(hideTimer); hovered.value = true; nextTick(positionTool) }
-const onLeave = (e) => {
-  if (toolEl.value && e.relatedTarget && toolEl.value.contains(e.relatedTarget)) return
-  clearTimeout(hideTimer)
-  hideTimer = setTimeout(() => { hovered.value = false }, 150)
-}
-const onToolEnter = () => { clearTimeout(hideTimer); hovered.value = true; positionTool() }
-const onToolLeave = () => {
-  clearTimeout(hideTimer)
-  hideTimer = setTimeout(() => { hovered.value = false }, 150)
-}
+// ---------- 工具条：仅选中图片显示（点击选中后出现，其他图片不显示），fixed + 视口钳制 ----------
 const positionTool = () => {
   const host = imgEl.value?.closest('.qre-img')
   const t = toolEl.value
@@ -87,8 +68,9 @@ const positionTool = () => {
   if (top < 6) top = r.bottom + 6
   toolPos.value = { left: left + 'px', top: top + 'px' }
 }
-watch(hovered, (v) => {
+watch(() => props.selected, (v) => {
   if (v) {
+    nextTick(positionTool)
     window.addEventListener('scroll', positionTool, true)
     window.addEventListener('resize', positionTool)
   } else {
