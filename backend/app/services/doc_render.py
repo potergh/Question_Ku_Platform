@@ -160,9 +160,14 @@ def question_html(doc: dict, practice_id: str, prefix: str) -> str:
         if len(imgs) == 1:
             out.append(_img_html(imgs[0]["src"], imgs[0]["attrs"], assets))
         else:
+            def _cell_style(attrs):
+                h = (attrs or {}).get("height")
+                if isinstance(h, (int, float)) and h > 0:
+                    return f"max-width:100%;height:auto;max-height:{h:g}px"
+                return "max-width:100%;height:auto"
             cells = "".join(
                 f'<div class="q-img-cell"><img src="{_asset_uri(i["src"], assets)}" '
-                f'style="max-width:100%;height:auto"></div>' for i in imgs)
+                f'style="{_cell_style(i["attrs"])}"></div>' for i in imgs)
             out.append(f'<div class="q-img-row">{cells}</div>')
         imgs.clear()
 

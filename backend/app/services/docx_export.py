@@ -570,7 +570,7 @@ def _add_image_row(doc, items, assets: Path, content_width):
         if not path.exists():
             p.add_run(f"[图片缺失：{name}]")
             continue
-        width = _fit_width(path, cell_w)
+        width = _fit_width(path, cell_w, (attrs.get("height") if (attrs := items[i][1]) else None))
         p.add_run().add_picture(_picture_source(path), width=width)
 
 
@@ -585,13 +585,17 @@ def _natural_size(path: Path):
         return None
 
 
-def _fit_width(path: Path, max_width):
-    """fit：宽受 max_width 与默认上限（内容区 50%）双重封顶，高度封顶后再反推宽度；读不到尺寸保持原样。"""
+def _fit_width(path: Path, max_width, max_height=None):
+    """fit：宽受 max_width 与默认上限（内容区 50%）双重封顶，高度封顶后再反推宽度；读不到尺寸保持原样。
+    max_height：额外的行高封顶（阶段 4，行内图片 height 属性），先按它缩宽再走默认上限。"""
     ns = _natural_size(path)
     if not ns:
         return None
     w, h = ns
     cap_w = min(max_width, int(max_width / 2))
+    if max_height and h > max_height:
+        w = int(w * max_height / h)
+        h = max_height
     if h > FIT_MAX_H:
         w = int(w * FIT_MAX_H / h)
     if h > MAX_IMG_H:

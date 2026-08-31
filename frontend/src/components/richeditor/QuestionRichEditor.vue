@@ -471,6 +471,7 @@ const removeCurrentOption = async () => {
 .qre-canvas :deep(.qre-img-wrap) { position: relative; display: inline-block; }
 .qre-canvas :deep(.qre-img img) { max-width: 100%; }
 .qre-canvas :deep(.qre-img[data-selected]) { outline: 2px solid #409eff; border-radius: 4px; }
+.qre-canvas :deep(.qre-img) { z-index: 1; }
 .qre-canvas :deep(.qre-img-handle) {
   position: absolute; bottom: -5px; right: -5px;
   width: 12px; height: 12px;
@@ -483,10 +484,9 @@ const removeCurrentOption = async () => {
   background: #f5f7fa; border: 1px dashed #c0c4cc;
   color: #909399; font-size: 12px; border-radius: 4px;
 }
-.qre-canvas :deep(.qre-img-tools) { position: absolute; right: 6px; top: 6px; display: none;
-  gap: 4px; background: rgba(255,255,255,.92); padding: 3px 6px; border-radius: 4px;
-  box-shadow: 0 1px 4px rgba(0,0,0,.15); align-items: center; }
-.qre-canvas :deep(.qre-img:hover .qre-img-tools) { display: flex; }
+.qre-canvas :deep(.qre-img-tools) { position: fixed; display: flex; z-index: 3000;
+  gap: 4px; background: rgba(255,255,255,.96); padding: 3px 6px; border-radius: 4px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.2); align-items: center; white-space: nowrap; }
 .qre-canvas :deep(.qre-space) { position: relative; }
 .qre-canvas :deep(.qre-space-line) { height: 1.9em; }
 .qre-canvas :deep(.qre-space-zero) { color: #c0c4cc; font-size: 12px; }

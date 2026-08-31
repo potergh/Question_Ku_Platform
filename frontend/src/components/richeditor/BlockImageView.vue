@@ -1,25 +1,28 @@
 <!-- 块级图片节点视图：渲染 + 工具条 + 拖拽缩放控制点 + 排版切换（阶段 4） -->
+<!-- 工具条使用 position:fixed 并钳制在视口内，避免并排窄节点下被裁剪/遮挡（阶段 4 修复） -->
 <template>
   <node-view-wrapper as="div" class="qre-img" :class="alignCls" :style="nodeViewStyle"
     :data-layout="node.attrs.layout || 'row'"
-    :data-selected="selected || undefined">
+    :data-selected="selected || undefined"
+    @mouseenter="onEnter" @mouseleave="onLeave">
     <div class="qre-img-wrap">
       <img v-if="!loadError" ref="imgEl" :src="imgSrc" :style="imgStyle" @error="loadError = true" />
       <div v-else class="qre-img-missing">⚠ 图片缺失</div>
-      <!-- 选中时显示右下角缩放手柄 -->
+      <!-- 选中时显示右下角缩放手柄：并排时调整行整体高度，单图/独占时调宽度 -->
       <div v-if="selected && !loadError" class="qre-img-handle" @mousedown.stop.prevent="startResize"></div>
     </div>
-    <div class="qre-img-tools" contenteditable="false">
+    <div ref="toolEl" v-show="hovered || selected" class="qre-img-tools" contenteditable="false" :style="toolPos"
+         @mouseenter="onToolEnter" @mouseleave="onToolLeave">
       <!-- 排版切换：并排 / 独占（阶段 4） -->
       <el-button size="small" text @click="toggleLayout">
         {{ (node.attrs.layout || 'row') === 'row' ? '⇋独占' : '⇆并排' }}
       </el-button>
-      <el-select :model-value="node.attrs.align || 'center'" size="small" style="width:92px" :teleported="false"
+      <el-select :model-value="node.attrs.align || 'center'" size="small" style="width:76px" :teleported="false"
                  @change="v => updateAttributes({ align: v })">
         <el-option label="左对齐" value="left" /><el-option label="居中" value="center" /><el-option label="右对齐" value="right" />
       </el-select>
       <!-- 宽度：适应内容 或任意百分比（拖拽缩放后出现的非预设值动态补一项） -->
-      <el-select :model-value="widthDisplay" size="small" style="width:112px" :teleported="false"
+      <el-select :model-value="widthDisplay" size="small" style="width:88px" :teleported="false"
                  @change="v => onWidthChange(v)">
         <el-option label="适应内容" value="fit" />
         <el-option v-if="customWidthOption" :label="`${customWidthOption}%`" :value="customWidthOption" />
@@ -34,7 +37,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { NodeViewWrapper } from '@tiptap/vue-3'
 import axios from 'axios'
 import { resolveAssetSrc } from './assets'
@@ -47,9 +50,52 @@ const props = defineProps({ node: Object, editor: Object, selected: Boolean,
 const imgEl = ref(null)
 const fileInput = ref(null)
 const loadError = ref(false)
+const hovered = ref(false)
+const toolEl = ref(null)
+const toolPos = ref({})
 
 // src 变化时重置加载错误状态
 watch(() => props.node.attrs.src, () => { loadError.value = false })
+
+// 选中即打开工具条并定位（避免仅靠 hover 在窄节点上难以触发）
+watch(() => props.selected, (v) => { if (v) { hovered.value = true; nextTick(positionTool) } })
+
+// ---------- 工具条：fixed + 视口内钳制，不被并排相邻节点/滚动容器裁剪 ----------
+// 关闭带 150ms 宽限期：工具条悬停在图片上方，鼠标移向工具条途经缝隙时不会瞬间消失
+let hideTimer = null
+const onEnter = () => { clearTimeout(hideTimer); hovered.value = true; nextTick(positionTool) }
+const onLeave = (e) => {
+  if (toolEl.value && e.relatedTarget && toolEl.value.contains(e.relatedTarget)) return
+  clearTimeout(hideTimer)
+  hideTimer = setTimeout(() => { hovered.value = false }, 150)
+}
+const onToolEnter = () => { clearTimeout(hideTimer); hovered.value = true; positionTool() }
+const onToolLeave = () => {
+  clearTimeout(hideTimer)
+  hideTimer = setTimeout(() => { hovered.value = false }, 150)
+}
+const positionTool = () => {
+  const host = imgEl.value?.closest('.qre-img')
+  const t = toolEl.value
+  if (!host || !t) return
+  const r = host.getBoundingClientRect()
+  const tw = t.offsetWidth || 280
+  const th = t.offsetHeight || 32
+  const vw = window.innerWidth || 1200
+  const left = Math.min(Math.max(r.left, 6), vw - tw - 6)
+  let top = r.top - th - 6
+  if (top < 6) top = r.bottom + 6
+  toolPos.value = { left: left + 'px', top: top + 'px' }
+}
+watch(hovered, (v) => {
+  if (v) {
+    window.addEventListener('scroll', positionTool, true)
+    window.addEventListener('resize', positionTool)
+  } else {
+    window.removeEventListener('scroll', positionTool, true)
+    window.removeEventListener('resize', positionTool)
+  }
+})
 
 // 宽度展示：数字 = 百分比，'fit' = 适应内容
 const widthDisplay = computed(() => {
@@ -76,22 +122,21 @@ const toggleLayout = () => {
   props.updateAttributes({ layout: cur === 'row' ? 'block' : 'row' })
 }
 
-// 计算当前图片所在的连续 row 组大小（用于并排等宽分配）
-const rowImageCount = computed(() => {
+// 计算当前图片所在的连续 row 组（数量 + 节点位置），用于等宽分配与整行缩放
+const rowGroup = computed(() => {
   const doc = props.editor.state.doc
   let myPos = -1
   let myNode = null
   doc.descendants((node, pos) => {
     if (myPos >= 0) return false
     if (node.type.name === 'image' && node.attrs.src === props.node.attrs.src) {
-      // 用对象引用确认是同一个节点（避免同名 src 误匹配）
       if (!myNode) { myNode = node; myPos = pos }
     }
   })
-  if (myPos < 0 || (props.node.attrs.layout || 'row') !== 'row') return 1
-
-  let count = 1
-  // 向前数连续 row 图片
+  const empty = { count: 1, positions: [] }
+  if (myPos < 0 || (props.node.attrs.layout || 'row') !== 'row') return empty
+  const positions = []
+  // 向前收集连续 row 图片
   let pos = myPos
   while (pos > 0) {
     const resolved = doc.resolve(pos)
@@ -100,21 +145,25 @@ const rowImageCount = computed(() => {
     if (idx === 0) break
     const prev = parent.child(idx - 1)
     if (prev.type.name === 'image' && (prev.attrs.layout || 'row') === 'row') {
-      count++
+      positions.unshift(pos - prev.nodeSize)
       pos -= prev.nodeSize
     } else break
   }
-  // 向后数连续 row 图片
+  positions.push(myPos)
+  // 向后收集连续 row 图片（用累计 nodeSize 求后续兄弟节点位置）
   const resolved = doc.resolve(myPos)
   const parent = resolved.parent
   const startIdx = resolved.index()
+  let nextPos = myPos
   for (let i = startIdx + 1; i < parent.childCount; i++) {
+    nextPos += parent.child(i - 1).nodeSize
     const child = parent.child(i)
-    if (child.type.name === 'image' && (child.attrs.layout || 'row') === 'row') count++
+    if (child.type.name === 'image' && (child.attrs.layout || 'row') === 'row') positions.push(nextPos)
     else break
   }
-  return count
+  return { count: positions.length, positions }
 })
+const rowImageCount = computed(() => rowGroup.value.count)
 
 const requestReplace = () => {
   props.editor.storage.qre.onRequestReplaceImage?.(props.node.attrs.src)
@@ -157,8 +206,17 @@ const imgStyle = computed(() => {
   const inRow = layout === 'row' && rowImageCount.value > 1
   const w = props.node.attrs.width
   if (inRow) {
-    // 并排：图片填满等宽 wrapper（等宽百分比由 wrapStyle 计算）
-    return { width: '100%', height: 'auto', maxWidth: 'none', maxHeight: 'none' }
+    // 并排：图片填满等宽 wrapper；height 属性用于整行高度缩放（max-height 封顶）
+    const style = { width: '100%', height: 'auto', maxWidth: 'none', maxHeight: 'none' }
+    const h = props.node.attrs.height
+    if (h) style.maxHeight = h + 'px'
+    return style
+  }
+  if (layout === 'block') {
+    // 独占纵向：默认铺满整行居中（在空白处拖动后期望"在中间铺满全部区域"）
+    if (!w || w === 'fit') return { width: '100%', maxWidth: 'none', maxHeight: '8cm' }
+    if (typeof w === 'number') return { width: w + '%', maxWidth: 'none', maxHeight: 'none' }
+    if (typeof w === 'string' && w.endsWith('%')) return { width: w, maxWidth: 'none', maxHeight: 'none' }
   }
   if (!w || w === 'fit') return { width: 'auto', maxWidth: '50%', maxHeight: '8cm' }
   if (typeof w === 'number') return { width: w + '%', maxWidth: 'none', maxHeight: 'none' }
@@ -166,17 +224,43 @@ const imgStyle = computed(() => {
   return { width: 'auto', maxWidth: '50%', maxHeight: '8cm' }
 })
 
-// 拖拽缩放：以编辑区内容宽度为基准，按比例更新 width 属性
+// 把补丁应用到当前图片所在的整行所有图片节点（等宽并排保持一致）
+const patchRowImages = (patch) => {
+  const { state, dispatch } = props.editor.view
+  const doc = state.doc
+  const positions = rowGroup.value.positions
+  if (!positions.length) { props.updateAttributes(patch); return }
+  let tr = state.tr
+  for (const pos of positions) {
+    const node = doc.nodeAt(pos)
+    if (node && node.type.name === 'image') {
+      tr = tr.setNodeMarkup(pos, null, { ...node.attrs, ...patch })
+    }
+  }
+  dispatch(tr)
+}
+
+// 拖拽缩放：
+// - 并排(row)时：调整个行整体高度（对整行图片写 height=px 封顶），解决"整体高度无法调整"
+// - 单图/独占(block)时：按内容宽度百分比更新 width 属性
 const startResize = (e) => {
   e.preventDefault()
+  const inRow = (props.node.attrs.layout || 'row') === 'row' && rowImageCount.value > 1
   const startX = e.clientX
+  const startY = e.clientY
   const startW = imgEl.value?.offsetWidth || 100
+  const startH = imgEl.value?.offsetHeight || 100
   const containerW = props.editor.view.dom.closest('.qre-prosemirror')?.offsetWidth || 600
 
   const onMove = (ev) => {
-    const delta = ev.clientX - startX
-    const pct = Math.round(Math.max(20, startW + delta) / containerW * 100)
-    props.updateAttributes({ width: Math.max(5, Math.min(100, pct)) })
+    if (inRow) {
+      const newH = Math.max(20, Math.round(startH + (ev.clientY - startY)))
+      patchRowImages({ height: newH })
+    } else {
+      const delta = ev.clientX - startX
+      const pct = Math.round(Math.max(20, startW + delta) / containerW * 100)
+      props.updateAttributes({ width: Math.max(5, Math.min(100, pct)) })
+    }
   }
   const onUp = () => {
     document.removeEventListener('mousemove', onMove)
