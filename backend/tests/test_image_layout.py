@@ -216,7 +216,7 @@ async def test_docx_export_png_and_webp_both_supported(client, test_db, tmp_path
     assert len(_image_rels(doc)) == 2
 
 
-# ---------------- 阶段 4：并排行高封顶（height 属性） ----------------
+# ---------------- 阶段 4：并排整行等比缩放（scale 属性） ----------------
 
 def _tall_png_bytes(w=10, h=100):
     buf = io.BytesIO()
@@ -224,8 +224,8 @@ def _tall_png_bytes(w=10, h=100):
     return buf.getvalue()
 
 
-async def _set_image_heights(test_db, pid, h=40):
-    """给练习文档所有 image 节点补 height 属性（模拟编辑器整行缩放后保存）。"""
+async def _set_image_scales(test_db, pid, sc=50):
+    """给练习文档所有 image 节点补 scale 属性（模拟编辑器整行缩放后保存）。"""
     from sqlalchemy import select
     from app.models.practice import PracticeQuestion
     from app.services.rich_document import serialize
@@ -235,13 +235,13 @@ async def _set_image_heights(test_db, pid, h=40):
         doc = json.loads(pq.rich_document)
         for n in doc["content"]:
             if n.get("type") == "image":
-                n["attrs"]["height"] = h
+                n["attrs"]["scale"] = sc
         pq.rich_document = serialize(doc)
         await db.commit()
 
 
-async def test_doc_render_row_height_cap(client, test_db, tmp_path):
-    """row 图片带 height 属性：行单元格 img 内联 max-height 封顶（与编辑器整行缩放一致）。"""
+async def test_doc_render_row_scale(client, test_db, tmp_path):
+    """row 图片带 scale 属性：行容器内联 width=scale% + margin auto（整行等比缩放并居中）。"""
     practice = await _create_practice(client, test_db, tmp_path)
     _put_asset(practice["id"], "tall.png", _tall_png_bytes())
     q = await _question(client, practice)
@@ -250,14 +250,15 @@ async def test_doc_render_row_height_cap(client, test_db, tmp_path):
         ("asset://practice/tall.png", "row", None),
     ]))
     assert res.status_code == 200, res.text
-    await _set_image_heights(test_db, practice["id"], 40)
+    await _set_image_scales(test_db, practice["id"], 50)
     p = await _load_with_blocks(test_db, practice["id"])
     html = build_practice_html(p, practice["id"])
-    assert "max-height:40px" in html
+    assert 'class="q-img-row" style="width:50%;margin:4px auto"' in html
+    assert html.count('class="q-img-cell"') == 2
 
 
-async def test_docx_row_height_cap(client, test_db, tmp_path):
-    """row 图片带 height 属性：Word 中图片按高度封顶缩放（保比例、不超列宽）。"""
+async def test_docx_row_scale(client, test_db, tmp_path):
+    """row 图片带 scale 属性：Word 整行等比缩放——行总宽=内容宽*scale%，等宽列随行变窄、表格居中。"""
     from docx import Document
     practice = await _create_practice(client, test_db, tmp_path)
     _put_asset(practice["id"], "tall.png", _tall_png_bytes())
@@ -267,11 +268,15 @@ async def test_docx_row_height_cap(client, test_db, tmp_path):
         ("asset://practice/tall.png", "row", None),
     ]))
     assert res.status_code == 200, res.text
-    await _set_image_heights(test_db, practice["id"], 40)
+    await _set_image_scales(test_db, practice["id"], 50)
     p = await _load_with_blocks(test_db, practice["id"])
     data, _ = await _asyncio_to_thread(docx_export.build_docx, p, practice["id"])
     d = Document(io.BytesIO(data))
-    # 图片 height 封顶：40px -> 40*9525 = 381000 EMU（保比例缩放后不超该高度）
-    heights = [s.height for s in d.inline_shapes]
-    assert heights, "no inline pictures"
-    assert all(h <= 40 * 9525 + 1 for h in heights), heights
+    assert d.tables, "no table"
+    # 2 图 50%：每列 = 内容宽*50%/2；图片 fit 后不超列宽；表格居中
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    col_w = d.tables[0].rows[0].cells[0].width
+    widths = [s.width for s in d.inline_shapes]
+    assert widths, "no inline pictures"
+    assert all(w <= col_w + 1 for w in widths), widths
+    assert d.tables[0].alignment == WD_TABLE_ALIGNMENT.CENTER

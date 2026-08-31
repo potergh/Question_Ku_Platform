@@ -555,11 +555,16 @@ def _add_image(doc, src: str, style: dict, assets: Path, content_width):
 
 
 def _add_image_row(doc, items, assets: Path, content_width):
-    """连续图片并排：无边框单行表格，等宽列；单元格内居中且不超过列宽。items 为 (src, style) 序列。"""
+    """连续图片并排：无边框单行表格，等宽列；单元格内居中且不超过列宽。items 为 (src, style) 序列。
+    阶段 4：scale（整行等比缩放）→ 行总宽 = 内容宽 * scale%，等宽列随行变窄，表格保持居中。"""
     n = len(items)
+    scale = (items[0][1] or {}).get("scale")
+    row_w = content_width
+    if isinstance(scale, (int, float)) and 0 < scale < 100:
+        row_w = int(content_width * scale / 100)
     table = doc.add_table(rows=1, cols=n)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    cell_w = content_width // n
+    cell_w = max(1, row_w // n)
     for i, (src, _) in enumerate(items):
         cell = table.rows[0].cells[i]
         cell.width = cell_w
@@ -570,7 +575,7 @@ def _add_image_row(doc, items, assets: Path, content_width):
         if not path.exists():
             p.add_run(f"[图片缺失：{name}]")
             continue
-        width = _fit_width(path, cell_w, (attrs.get("height") if (attrs := items[i][1]) else None))
+        width = _fit_width(path, cell_w)
         p.add_run().add_picture(_picture_source(path), width=width)
 
 
@@ -587,7 +592,7 @@ def _natural_size(path: Path):
 
 def _fit_width(path: Path, max_width, max_height=None):
     """fit：宽受 max_width 与默认上限（内容区 50%）双重封顶，高度封顶后再反推宽度；读不到尺寸保持原样。
-    max_height：额外的行高封顶（阶段 4，行内图片 height 属性），先按它缩宽再走默认上限。"""
+    max_height：可选的高度封顶，先按它等比缩宽再走默认上限（阶段 4 行内高度封顶已由 scale 取代，仅保留参数兼容）。"""
     ns = _natural_size(path)
     if not ns:
         return None

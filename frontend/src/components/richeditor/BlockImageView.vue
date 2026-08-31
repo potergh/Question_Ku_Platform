@@ -15,16 +15,22 @@
       <el-button size="small" text @click="toggleLayout">
         {{ (node.attrs.layout || 'row') === 'row' ? '⇋独占' : '⇆并排' }}
       </el-button>
-      <el-select :model-value="node.attrs.align || 'center'" size="small" style="width:76px" :teleported="false"
+      <el-select v-if="!inRow" :model-value="node.attrs.align || 'center'" size="small" style="width:76px" :teleported="false"
                  @change="v => updateAttributes({ align: v })">
         <el-option label="左对齐" value="left" /><el-option label="居中" value="center" /><el-option label="右对齐" value="right" />
       </el-select>
-      <!-- 宽度：适应内容 或任意百分比（拖拽缩放后出现的非预设值动态补一项） -->
-      <el-select :model-value="widthDisplay" size="small" style="width:88px" :teleported="false"
+      <!-- 宽度（独占/单图）：适应内容 或任意百分比（拖拽缩放后出现的非预设值动态补一项） -->
+      <el-select v-if="!inRow" :model-value="widthDisplay" size="small" style="width:88px" :teleported="false"
                  @change="v => onWidthChange(v)">
         <el-option label="适应内容" value="fit" />
         <el-option v-if="customWidthOption" :label="`${customWidthOption}%`" :value="customWidthOption" />
         <el-option v-for="p in WIDTH_PRESETS" :key="p" :label="`${p}%`" :value="p" />
+      </el-select>
+      <!-- 并排整体缩放（阶段 4）：整行等比例缩放（首图左偏移居中），拖拽/预设均可 -->
+      <el-select v-if="inRow" :model-value="scaleDisplay" size="small" style="width:88px" :teleported="false"
+                 @change="v => onScaleChange(v)">
+        <el-option v-if="customScaleOption" :label="`${customScaleOption}%`" :value="customScaleOption" />
+        <el-option v-for="p in SCALE_PRESETS" :key="p" :label="`${p}%`" :value="p" />
       </el-select>
       <el-button size="small" text @click="requestReplace">替换</el-button>
       <el-button size="small" text @click="fileInput?.click()">上传</el-button>
@@ -41,6 +47,7 @@ import axios from 'axios'
 import { resolveAssetSrc } from './assets'
 
 const WIDTH_PRESETS = [25, 40, 50, 60, 75, 80, 90, 100]
+const SCALE_PRESETS = [25, 40, 50, 60, 75, 80, 100]
 
 const props = defineProps({ node: Object, editor: Object, selected: Boolean,
   updateAttributes: Function, deleteNode: Function })
@@ -143,9 +150,23 @@ const rowGroup = computed(() => {
     if (child.type.name === 'image' && (child.attrs.layout || 'row') === 'row') positions.push(nextPos)
     else break
   }
-  return { count: positions.length, positions }
+  return { count: positions.length, positions, index: positions.indexOf(myPos) }
 })
 const rowImageCount = computed(() => rowGroup.value.count)
+// 是否处于并排组中（多图 row）：此时隐藏宽度/对齐，改由整行缩放控制
+const inRow = computed(() => (props.node.attrs.layout || 'row') === 'row' && rowImageCount.value > 1)
+
+// 整行缩放（并排）：数字 = 占行宽百分比，null = 100 铺满整行
+const scaleDisplay = computed(() => props.node.attrs.scale || 100)
+const customScaleOption = computed(() => {
+  const s = scaleDisplay.value
+  return (typeof s === 'number' && !SCALE_PRESETS.includes(s)) ? s : null
+})
+const onScaleChange = (v) => {
+  const val = v >= 100 ? null : v
+  if (inRow.value) patchRowImages({ scale: val })   // 并排：整行一起缩放
+  else props.updateAttributes({ scale: val })
+}
 
 const requestReplace = () => {
   props.editor.storage.qre.onRequestReplaceImage?.(props.node.attrs.src)
@@ -176,11 +197,17 @@ const alignCls = computed(() => ({
   'is-right': props.node.attrs.align === 'right',
 }))
 const nodeViewStyle = computed(() => {
-  // 并排(row)时：节点视图占容器宽度的 1/N，多个 inline-block 节点视图横向排布
+  // 并排(row)时：节点视图占容器宽度的 scale/N %（整行总宽 = scale%，方案 A 整行等比缩放）；
+  // 首图加左偏移 (100-scale)/2 %，使缩放后的整行在容器内居中
   const layout = props.node.attrs.layout || 'row'
   const inRow = layout === 'row' && rowImageCount.value > 1
   if (!inRow) return {}
-  return { width: (100 / rowImageCount.value).toFixed(2) + '%' }
+  const scale = props.node.attrs.scale || 100
+  const style = { width: ((scale / 100) * 100 / rowImageCount.value).toFixed(2) + '%' }
+  if (rowGroup.value.index === 0) {
+    style.marginLeft = ((100 - scale) / 2).toFixed(2) + '%'
+  }
+  return style
 })
 
 const imgStyle = computed(() => {
@@ -188,11 +215,8 @@ const imgStyle = computed(() => {
   const inRow = layout === 'row' && rowImageCount.value > 1
   const w = props.node.attrs.width
   if (inRow) {
-    // 并排：图片填满等宽 wrapper；height 属性用于整行高度缩放（max-height 封顶）
-    const style = { width: '100%', height: 'auto', maxWidth: 'none', maxHeight: 'none' }
-    const h = props.node.attrs.height
-    if (h) style.maxHeight = h + 'px'
-    return style
+    // 并排：图片填满等宽 wrapper（整行缩放由节点宽度 scale/N% 控制，图片随节点等比缩放）
+    return { width: '100%', height: 'auto', maxWidth: 'none', maxHeight: 'none' }
   }
   if (layout === 'block') {
     // 独占纵向：默认铺满整行居中（在空白处拖动后期望"在中间铺满全部区域"）
@@ -223,7 +247,7 @@ const patchRowImages = (patch) => {
 }
 
 // 拖拽缩放：
-// - 并排(row)时：调整个行整体高度（对整行图片写 height=px 封顶），解决"整体高度无法调整"
+// - 并排(row)时：水平拖拽整行等比例缩放（写 scale 百分比 20~100）
 // - 单图/独占(block)时：按内容宽度百分比更新 width 属性
 const startResize = (e) => {
   e.preventDefault()
@@ -236,8 +260,10 @@ const startResize = (e) => {
 
   const onMove = (ev) => {
     if (inRow) {
-      const newH = Math.max(20, Math.round(startH + (ev.clientY - startY)))
-      patchRowImages({ height: newH })
+      const startScale = props.node.attrs.scale || 100
+      const delta = ev.clientX - startX
+      const newScale = Math.max(20, Math.min(100, Math.round(startScale + delta / containerW * 100)))
+      patchRowImages({ scale: newScale >= 100 ? null : newScale })
     } else {
       const delta = ev.clientX - startX
       const pct = Math.round(Math.max(20, startW + delta) / containerW * 100)

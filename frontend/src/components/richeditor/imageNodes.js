@@ -16,7 +16,7 @@ export const BlockImage = Node.create({
       align: { default: 'center' },
       width: { default: null },   // null/'fit' = 适应；数字 = 百分比；字符串 '50%' 向后兼容
       layout: { default: 'row' }, // 'row' = 与相邻图片并排 | 'block' = 独占一行纵向
-      height: { default: null },  // 并排时整行高度封顶（px），拖拽手柄缩放后保存；block/单图忽略
+      scale: { default: null },   // 并排时整行等比例缩放（占行宽百分比 20~100），null=100 铺满；block/单图忽略
     }
   },
   // 序列化/粘贴输出用解析后的真实地址，避免 asset:// 进 DOM 产生请求报错（存储仍用 asset://，见 getJSON 不变）
