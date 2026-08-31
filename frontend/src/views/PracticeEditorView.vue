@@ -235,8 +235,17 @@
                 <span>右<el-input-number v-model="settingsForm.margins.right" :min="5" :max="60" size="small" /></span>
               </div>
             </el-form-item>
-            <el-form-item label="学生信息栏"><el-switch v-model="settingsForm.showInfoBar" />
-              <span class="hint">导出时显示姓名/班级/日期栏</span></el-form-item>
+            <el-form-item label="学生信息栏">
+              <el-switch v-model="settingsForm.showInfoBar" />
+              <template v-if="settingsForm.showInfoBar">
+                <el-radio-group v-model="settingsForm.infoBarAlign" size="small" style="margin-left:10px">
+                  <el-radio-button value="left">左</el-radio-button>
+                  <el-radio-button value="center">居中</el-radio-button>
+                  <el-radio-button value="right">右</el-radio-button>
+                </el-radio-group>
+              </template>
+              <span class="hint">导出时显示姓名/班级/日期栏</span>
+            </el-form-item>
             <el-form-item label="学校(可选)"><el-input v-model="settingsForm.school" placeholder="用于 {school} 变量" /></el-form-item>
             <el-form-item label="教师(可选)"><el-input v-model="settingsForm.teacher" placeholder="用于 {teacher} 变量" /></el-form-item>
             <el-form-item label="页码"><el-switch v-model="settingsForm.showPageNumber" /></el-form-item>
@@ -459,6 +468,7 @@ const moveTarget = ref('')
 const moveQuestionTarget = ref(null)
 const showSettings = ref(false)
 const settingsForm = reactive({ title: '', subtitle: '', showInfoBar: true,
+  infoBarAlign: 'left',
   marginPreset: 'normal', margins: { top: 25, bottom: 25, left: 25, right: 25 },
   orientation: 'portrait', showPageNumber: true, showScore: false, showTotalScore: false,
   school: '', teacher: '', hfTemplate: 'custom',
@@ -676,6 +686,7 @@ const openSettings = () => {
   settingsForm.subtitle = practice.value.subtitle || ''
   const pc = practice.value.page_config || {}
   settingsForm.showInfoBar = pc.show_info_bar ?? true
+  settingsForm.infoBarAlign = pc.info_bar_align || 'left'
   settingsForm.marginPreset = pc.margin_preset || 'normal'
   settingsForm.margins = { top: 25, bottom: 25, left: 25, right: 25, ...(pc.margins || {}) }
   settingsForm.orientation = pc.orientation || 'portrait'
@@ -709,6 +720,7 @@ const saveSettings = async () => {
     subtitle: settingsForm.subtitle || null,
     page_config: { ...(practice.value.page_config || {}),
       show_info_bar: settingsForm.showInfoBar,
+      info_bar_align: settingsForm.infoBarAlign,
       margin_preset: settingsForm.marginPreset,
       margins: settingsForm.margins,
       orientation: settingsForm.orientation,

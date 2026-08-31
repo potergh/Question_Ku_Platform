@@ -54,6 +54,16 @@ def test_resolve_page_vars():
     assert "{page}" in out   # 页码占位保留，由 PDF/Word 各自处理
 
 
+def test_info_bar_align():
+    """学生信息栏对齐：默认左，可配置居中/右；HTML 输出 text-align。"""
+    s = rs.render_settings(_practice({}))
+    assert s["info_bar_align"] == "left"
+    s2 = rs.render_settings(_practice({"info_bar_align": "center", "show_info_bar": True}))
+    assert s2["info_bar_align"] == "center"
+    html = rs.build_practice_html(_practice({"info_bar_align": "center", "show_info_bar": True}), "x")
+    assert 'class="info-bar" style="text-align:center"' in html
+
+
 def test_hf_template_and_frag():
     zone = {"left": "", "center": "第 {page} 页", "right": "{total}",
             "font_size": 9, "line": True}

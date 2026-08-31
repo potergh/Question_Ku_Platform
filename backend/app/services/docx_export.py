@@ -170,7 +170,10 @@ def _build_docx_inner(practice, practice_id: str, fb: "_FormulaFallback") -> byt
             pt = doc.add_paragraph(f"满分：{total:g} 分")
             pt.alignment = WD_ALIGN_PARAGRAPH.CENTER
     if s["show_info_bar"]:
-        doc.add_paragraph("姓名：____________　班级：____________　日期：____________")
+        p_info = doc.add_paragraph("姓名：____________　班级：____________　日期：____________")
+        p_info.alignment = {"left": WD_ALIGN_PARAGRAPH.LEFT, "center": WD_ALIGN_PARAGRAPH.CENTER,
+                            "right": WD_ALIGN_PARAGRAPH.RIGHT}.get(s.get("info_bar_align", "left"),
+                                                                   WD_ALIGN_PARAGRAPH.LEFT)
 
     assets = practice_service.practice_assets_dir(practice_id)
     if practice.layout_document:

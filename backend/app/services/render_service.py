@@ -89,6 +89,7 @@ def render_settings(practice: Practice) -> dict:
         "margins": {"top": t, "bottom": b, "left": l, "right": r},
         "orientation": cfg.get("orientation", "portrait"),
         "show_info_bar": cfg.get("show_info_bar", True),
+        "info_bar_align": cfg.get("info_bar_align", "left"),
         "show_page_number": cfg.get("show_page_number", True),
         "show_score": cfg.get("show_score", False),
         "show_total_score": cfg.get("show_total_score", False),
@@ -178,7 +179,8 @@ def build_practice_html(practice: Practice, practice_id: str) -> str:
     if s["show_total_score"] and has_score:
         head.append(f'<div class="p-total">满分：{total_score:g} 分</div>')
     if s["show_info_bar"]:
-        head.append('<div class="info-bar">姓名：____________　班级：____________　日期：____________</div>')
+        align = s.get("info_bar_align", "left")
+        head.append(f'<div class="info-bar" style="text-align:{align}">姓名：____________　班级：____________　日期：____________</div>')
 
     if practice.layout_document:
         body = _layout_bodies(practice, s, practice_id)
