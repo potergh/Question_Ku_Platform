@@ -19,6 +19,34 @@ from app.utils.question_types import map_question_type
 
 ASSET_RE = re.compile(r"asset://([^\s\)]+)")
 
+# 阶段 6：新练习默认页眉页脚（标题页眉 + 居中页码）
+DEFAULT_HEADER = {
+    "enabled": True,
+    "left": "", "center": "{title}", "right": "",
+    "font_size": 9, "distance": 8, "line": False,
+    "first_page_different": True, "first_hidden": True,
+}
+DEFAULT_FOOTER = {
+    "enabled": True,
+    "left": "", "center": "{page} / {total}", "right": "",
+    "font_size": 9, "distance": 8, "line": False,
+    "first_hidden": False,
+}
+
+
+def default_page_config() -> dict:
+    """新练习默认页面配置（含阶段 6 页眉页脚默认）。"""
+    return {
+        "show_info_bar": True, "margin_preset": "normal", "show_page_number": True,
+        "show_score": False, "show_total_score": True,
+        "default_style": {"font_family": "宋体", "font_size": 10.5, "line_height": 1.7},
+        "orientation": "portrait",
+        "variables": {"school": "", "teacher": ""},
+        "header": DEFAULT_HEADER,
+        "footer": DEFAULT_FOOTER,
+    }
+
+
 # 小节按题型生成时的固定顺序
 SECTION_TYPE_ORDER = [
     "选择题", "多选题", "填空题", "实验题", "计算题",
@@ -215,7 +243,7 @@ async def create_practice_from_questions(
 ) -> Practice:
     """按题型分组创建练习 + 小节 + 题目快照。新建练习直接进入新文档结构（native）。"""
     practice = Practice(title=title, subtitle=subtitle, subject=subject, grade=grade,
-                        migration_status="native")
+                        migration_status="native", page_config=default_page_config())
     db.add(practice)
     await db.flush()
 

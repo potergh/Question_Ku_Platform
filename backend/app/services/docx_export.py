@@ -8,11 +8,12 @@ from pathlib import Path
 
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_TAB_ALIGNMENT
+from docx.enum.section import WD_ORIENT
 from docx.dml.color import RGBColor
 from docx.oxml.ns import qn, nsdecls
 from docx.oxml import OxmlElement, parse_xml
-from docx.shared import Cm, Pt
+from docx.shared import Cm, Mm, Pt
 
 from app.services import practice_service, typography, workbook_layout
 from app.services.doc_render import norm_para_attrs
@@ -125,8 +126,9 @@ def build_docx(practice, practice_id: str) -> tuple[bytes, list[str]]:
 
 def _build_docx_inner(practice, practice_id: str, fb: "_FormulaFallback") -> bytes:
     s = render_settings(practice)
-    margin = Cm(float(s["margin"].removesuffix("mm")) / 10)   # mm → cm（Cm() 收厘米）
-    content_width = A4_W - 2 * margin
+    margins = s["margins"]
+    landscape = s.get("orientation", "portrait") == "landscape"
+    content_width = (A4_H if landscape else A4_W) - Mm(margins["left"]) - Mm(margins["right"])
 
     doc = Document()
     # 全局默认样式（阶段 2）：中文白名单字体 + 西文 Times New Roman，设在 Normal 样式上全文生效；
@@ -140,10 +142,17 @@ def _build_docx_inner(practice, practice_id: str, fb: "_FormulaFallback") -> byt
     normal.font.size = Pt(ds["font_size"])
     normal.paragraph_format.line_spacing = ds["line_height"]
     sec = doc.sections[0]
-    sec.page_width, sec.page_height = A4_W, A4_H
-    sec.top_margin = sec.bottom_margin = sec.left_margin = sec.right_margin = margin
-    if s["show_page_number"]:
-        _add_page_number(sec)
+    if landscape:
+        sec.orientation = WD_ORIENT.LANDSCAPE
+        sec.page_width, sec.page_height = A4_H, A4_W
+    else:
+        sec.orientation = WD_ORIENT.PORTRAIT
+        sec.page_width, sec.page_height = A4_W, A4_H
+    sec.top_margin = Mm(margins["top"])
+    sec.bottom_margin = Mm(margins["bottom"])
+    sec.left_margin = Mm(margins["left"])
+    sec.right_margin = Mm(margins["right"])
+    _apply_header_footer(sec, s, content_width)
 
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -362,6 +371,85 @@ def _set_run_font(run, name: str):
         run._element.rPr.rFonts.set(qn("w:eastAsia"), name)
     else:
         run.font.name = name
+
+
+def _apply_header_footer(section, s: dict, content_width):
+    """阶段 6：页眉/页脚三栏 + 首页不同 + 动态字段。
+    header 为 dict（enabled 决定是否显示）；footer 为 None 时沿用旧 show_page_number 页码行为。"""
+    header = s.get("header")
+    footer = s.get("footer")
+    if header and header.get("enabled"):
+        _fill_zone(section.header.paragraphs[0], header, content_width, top=True)
+    if footer is None:
+        if s.get("show_page_number", True):
+            _add_page_number(section)
+    elif footer.get("enabled"):
+        _fill_zone(section.footer.paragraphs[0], footer, content_width, top=False)
+    first_hidden_header = bool(header and header.get("enabled")
+                               and header.get("first_page_different") and header.get("first_hidden"))
+    first_hidden_footer = bool(footer and footer.get("enabled") and footer.get("first_hidden"))
+    if first_hidden_header or first_hidden_footer:
+        section.different_first_page_header_footer = True   # 首页页眉/页脚保持 Word 默认空
+    if first_hidden_header:
+        section.first_page_header.is_linked_to_previous = False   # 创建独立空首页页眉
+    if first_hidden_footer:
+        section.first_page_footer.is_linked_to_previous = False   # 创建独立空首页页脚
+
+
+def _fill_zone(p, zone: dict, content_width, top: bool):
+    """把三栏文本写入页眉/页脚段落：左对齐 + 居中 tab + 右对齐 tab + 可选分隔线。"""
+    fs = Pt(int(zone.get("font_size", 9)))
+    if zone.get("line"):
+        pPr = p._p.get_or_add_pPr()
+        pbdr = OxmlElement("w:pBdr")
+        edge = "bottom" if top else "top"
+        el = OxmlElement(f"w:{edge}")
+        el.set(qn("w:val"), "single")
+        el.set(qn("w:sz"), "6")
+        el.set(qn("w:space"), "1")
+        el.set(qn("w:color"), "999999")
+        pbdr.append(el)
+        pPr.append(pbdr)
+    tabs = p.paragraph_format.tab_stops
+    tabs.add_tab_stop(int(content_width) // 2, WD_TAB_ALIGNMENT.CENTER)
+    tabs.add_tab_stop(int(content_width), WD_TAB_ALIGNMENT.RIGHT)
+    for key in ("left", "center", "right"):
+        text = zone.get(key, "")
+        if not text:
+            continue
+        if key != "left":
+            p.add_run().add_tab()
+        _add_zone_text(p, text, fs)
+
+
+def _add_zone_text(p, text: str, fs):
+    """把栏文本写入段落：普通文本设字号/中文字体；{page}/{total} → PAGE/NUMPAGES 域。"""
+    for part in re.split(r"(\{page\}|\{total\})", text):
+        if not part:
+            continue
+        if part == "{page}":
+            _add_field(p, "PAGE", fs)
+        elif part == "{total}":
+            _add_field(p, "NUMPAGES", fs)
+        else:
+            run = p.add_run(part)
+            run.font.size = fs
+            _set_cn_font(run)
+
+
+def _add_field(p, instr: str, fs):
+    """向段落追加一个 Word 域（PAGE/NUMPAGES）。"""
+    run = p.add_run()
+    for tag, attr, val in [("w:fldChar", "begin", None), ("w:instrText", None, instr),
+                           ("w:fldChar", "end", None)]:
+        el = OxmlElement(tag)
+        if tag == "w:fldChar":
+            el.set(qn("w:fldCharType"), attr)
+        else:
+            el.text = val
+        run._r.append(el)
+    run.font.size = fs
+    _set_cn_font(run)
 
 
 def _add_page_number(section):

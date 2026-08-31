@@ -206,40 +206,118 @@
       </template>
     </el-dialog>
 
-    <!-- 练习设置 -->
-    <el-dialog v-model="showSettings" title="练习设置" width="420px">
-      <el-form label-width="90px">
-        <el-form-item label="标题"><el-input v-model="settingsForm.title" /></el-form-item>
-        <el-form-item label="副标题"><el-input v-model="settingsForm.subtitle" /></el-form-item>
-        <el-form-item label="学生信息栏"><el-switch v-model="settingsForm.showInfoBar" />
-          <span class="hint">导出时显示姓名/班级/日期栏</span></el-form-item>
-        <el-form-item label="页边距">
-          <el-select v-model="settingsForm.marginPreset" style="width:160px">
-            <el-option label="窄（15mm）" value="narrow" />
-            <el-option label="标准（25mm）" value="normal" />
-            <el-option label="宽（32mm）" value="wide" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="页码"><el-switch v-model="settingsForm.showPageNumber" /></el-form-item>
-        <el-form-item label="显示分值"><el-switch v-model="settingsForm.showScore" /></el-form-item>
-        <el-form-item label="显示总分"><el-switch v-model="settingsForm.showTotalScore" /></el-form-item>
-        <el-divider content-position="left">默认正文样式（未局部覆盖的内容跟随）</el-divider>
-        <el-form-item label="默认字体">
-          <el-select v-model="settingsForm.defaultFont" style="width:160px">
-            <el-option v-for="f in FONT_NAMES" :key="f" :label="f" :value="f" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="默认字号">
-          <el-select v-model="settingsForm.defaultFontSize" style="width:160px">
-            <el-option v-for="s in FONT_SIZES" :key="s.value" :label="s.label" :value="s.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="默认行距">
-          <el-select v-model="settingsForm.defaultLineHeight" style="width:160px">
-            <el-option v-for="lh in LINE_HEIGHTS" :key="lh" :label="`${lh} 倍`" :value="lh" />
-          </el-select>
-        </el-form-item>
-      </el-form>
+    <!-- 练习设置（阶段 6：方向/页边距/页眉页脚三栏/变量/模板） -->
+    <el-dialog v-model="showSettings" title="练习设置" width="660px">
+      <el-tabs>
+        <el-tab-pane label="页面">
+          <el-form label-width="90px">
+            <el-form-item label="标题"><el-input v-model="settingsForm.title" /></el-form-item>
+            <el-form-item label="副标题"><el-input v-model="settingsForm.subtitle" /></el-form-item>
+            <el-form-item label="纸张方向">
+              <el-radio-group v-model="settingsForm.orientation">
+                <el-radio-button value="portrait">A4 纵向</el-radio-button>
+                <el-radio-button value="landscape">A4 横向</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+            <el-form-item label="页边距">
+              <el-radio-group v-model="settingsForm.marginPreset">
+                <el-radio-button value="narrow">窄(15)</el-radio-button>
+                <el-radio-button value="normal">标准(25)</el-radio-button>
+                <el-radio-button value="wide">宽(32)</el-radio-button>
+                <el-radio-button value="custom">自定义</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+            <el-form-item v-if="settingsForm.marginPreset === 'custom'" label="边距(mm)">
+              <div class="margin-grid">
+                <span>上<el-input-number v-model="settingsForm.margins.top" :min="5" :max="60" size="small" /></span>
+                <span>下<el-input-number v-model="settingsForm.margins.bottom" :min="5" :max="60" size="small" /></span>
+                <span>左<el-input-number v-model="settingsForm.margins.left" :min="5" :max="60" size="small" /></span>
+                <span>右<el-input-number v-model="settingsForm.margins.right" :min="5" :max="60" size="small" /></span>
+              </div>
+            </el-form-item>
+            <el-form-item label="学生信息栏"><el-switch v-model="settingsForm.showInfoBar" />
+              <span class="hint">导出时显示姓名/班级/日期栏</span></el-form-item>
+            <el-form-item label="学校(可选)"><el-input v-model="settingsForm.school" placeholder="用于 {school} 变量" /></el-form-item>
+            <el-form-item label="教师(可选)"><el-input v-model="settingsForm.teacher" placeholder="用于 {teacher} 变量" /></el-form-item>
+            <el-form-item label="页码"><el-switch v-model="settingsForm.showPageNumber" /></el-form-item>
+            <el-form-item label="显示分值"><el-switch v-model="settingsForm.showScore" /></el-form-item>
+            <el-form-item label="显示总分"><el-switch v-model="settingsForm.showTotalScore" /></el-form-item>
+            <el-divider content-position="left">默认正文样式（未局部覆盖的内容跟随）</el-divider>
+            <el-form-item label="默认字体">
+              <el-select v-model="settingsForm.defaultFont" style="width:160px">
+                <el-option v-for="f in FONT_NAMES" :key="f" :label="f" :value="f" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="默认字号">
+              <el-select v-model="settingsForm.defaultFontSize" style="width:160px">
+                <el-option v-for="s in FONT_SIZES" :key="s.value" :label="s.label" :value="s.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="默认行距">
+              <el-select v-model="settingsForm.defaultLineHeight" style="width:160px">
+                <el-option v-for="lh in LINE_HEIGHTS" :key="lh" :label="`${lh} 倍`" :value="lh" />
+              </el-select>
+            </el-form-item>
+          </el-form>
+        </el-tab-pane>
+        <el-tab-pane label="页眉">
+          <el-form label-width="72px">
+            <el-form-item label="启用页眉"><el-switch v-model="settingsForm.header.enabled" /></el-form-item>
+            <template v-if="settingsForm.header.enabled">
+              <el-form-item v-for="key in ['left','center','right']" :key="key"
+                :label="key === 'left' ? '左' : (key === 'center' ? '中' : '右')">
+                <div class="zone-row">
+                  <el-input v-model="settingsForm.header[key]" placeholder="留空则不显示" />
+                  <el-select :value="''" size="small" style="width:148px;margin-left:6px" placeholder="插入变量"
+                    @change="v => appendZoneVar('header', key, v)">
+                    <el-option v-for="ov in PAGE_VAR_OPTIONS" :key="ov.value" :label="ov.label" :value="ov.value" />
+                  </el-select>
+                </div>
+              </el-form-item>
+              <el-form-item label="字号">
+                <el-input-number v-model="settingsForm.header.fontSize" :min="6" :max="24" size="small" />
+                <span class="hint">pt</span>
+              </el-form-item>
+              <el-form-item label="分隔线"><el-switch v-model="settingsForm.header.line" /></el-form-item>
+              <el-form-item label="首页不同">
+                <el-switch v-model="settingsForm.header.firstPageDifferent" />
+                <span class="hint" style="margin-left:10px">首页隐藏页眉</span>
+                <el-switch v-if="settingsForm.header.firstPageDifferent" v-model="settingsForm.header.firstHidden"
+                  style="margin-left:8px" />
+              </el-form-item>
+            </template>
+          </el-form>
+        </el-tab-pane>
+        <el-tab-pane label="页脚">
+          <el-form label-width="72px">
+            <el-form-item label="启用页脚"><el-switch v-model="settingsForm.footer.enabled" /></el-form-item>
+            <template v-if="settingsForm.footer.enabled">
+              <el-form-item v-for="key in ['left','center','right']" :key="key"
+                :label="key === 'left' ? '左' : (key === 'center' ? '中' : '右')">
+                <div class="zone-row">
+                  <el-input v-model="settingsForm.footer[key]" placeholder="留空则不显示" />
+                  <el-select :value="''" size="small" style="width:148px;margin-left:6px" placeholder="插入变量"
+                    @change="v => appendZoneVar('footer', key, v)">
+                    <el-option v-for="ov in PAGE_VAR_OPTIONS" :key="ov.value" :label="ov.label" :value="ov.value" />
+                  </el-select>
+                </div>
+              </el-form-item>
+              <el-form-item label="字号">
+                <el-input-number v-model="settingsForm.footer.fontSize" :min="6" :max="24" size="small" />
+                <span class="hint">pt</span>
+              </el-form-item>
+              <el-form-item label="分隔线"><el-switch v-model="settingsForm.footer.line" /></el-form-item>
+              <el-form-item label="首页隐藏"><el-switch v-model="settingsForm.footer.firstHidden" /></el-form-item>
+            </template>
+            <el-divider content-position="left">快速模板</el-divider>
+            <el-form-item label="套用模板">
+              <el-select v-model="settingsForm.hfTemplate" style="width:220px" @change="applyHfTemplate">
+                <el-option v-for="t in HF_TEMPLATES" :key="t.value" :label="t.label" :value="t.value" />
+              </el-select>
+            </el-form-item>
+          </el-form>
+        </el-tab-pane>
+      </el-tabs>
       <template #footer>
         <el-button @click="showSettings = false">取消</el-button>
         <el-button type="primary" @click="saveSettings">保存</el-button>
@@ -381,9 +459,60 @@ const moveTarget = ref('')
 const moveQuestionTarget = ref(null)
 const showSettings = ref(false)
 const settingsForm = reactive({ title: '', subtitle: '', showInfoBar: true,
-  marginPreset: 'normal', showPageNumber: true, showScore: false, showTotalScore: false,
+  marginPreset: 'normal', margins: { top: 25, bottom: 25, left: 25, right: 25 },
+  orientation: 'portrait', showPageNumber: true, showScore: false, showTotalScore: false,
+  school: '', teacher: '', hfTemplate: 'custom',
+  header: { enabled: true, left: '', center: '{title}', right: '', fontSize: 9, distance: 8,
+    line: false, firstPageDifferent: true, firstHidden: true },
+  footer: { enabled: true, left: '', center: '{page} / {total}', right: '', fontSize: 9,
+    distance: 8, line: false, firstHidden: false },
   defaultFont: DEFAULT_STYLE.font_family, defaultFontSize: DEFAULT_STYLE.font_size,
   defaultLineHeight: DEFAULT_STYLE.line_height })
+
+// 页眉/页脚三栏可用变量
+const PAGE_VAR_OPTIONS = [
+  { value: '{title}', label: '{title} 练习标题' },
+  { value: '{subject}', label: '{subject} 科目' },
+  { value: '{grade}', label: '{grade} 年级' },
+  { value: '{date}', label: '{date} 日期' },
+  { value: '{page}', label: '{page} 页码' },
+  { value: '{total}', label: '{total} 总页数' },
+  { value: '{school}', label: '{school} 学校' },
+  { value: '{teacher}', label: '{teacher} 教师' },
+]
+// 页眉/页脚一键模板
+const HF_TEMPLATES = [
+  { value: 'custom', label: '保持当前' },
+  { value: 'none', label: '无页眉页脚' },
+  { value: 'title', label: '标题页眉 + 居中页码' },
+  { value: 'centerpage', label: '仅居中页码' },
+  { value: 'rightpage', label: '仅右侧页码' },
+]
+const applyHfTemplate = (v) => {
+  if (v === 'none') {
+    settingsForm.header.enabled = false
+    settingsForm.footer.enabled = false
+  } else if (v === 'title') {
+    settingsForm.header.enabled = true
+    settingsForm.header.left = ''; settingsForm.header.center = '{title}'; settingsForm.header.right = ''
+    settingsForm.footer.enabled = true
+    settingsForm.footer.left = ''; settingsForm.footer.center = '{page} / {total}'; settingsForm.footer.right = ''
+  } else if (v === 'centerpage') {
+    settingsForm.header.enabled = false
+    settingsForm.footer.enabled = true
+    settingsForm.footer.left = ''; settingsForm.footer.center = '{page} / {total}'; settingsForm.footer.right = ''
+  } else if (v === 'rightpage') {
+    settingsForm.header.enabled = false
+    settingsForm.footer.enabled = true
+    settingsForm.footer.left = ''; settingsForm.footer.center = ''; settingsForm.footer.right = '{page}'
+  }
+  settingsForm.hfTemplate = 'custom'
+}
+// 向页眉/页脚某栏追加变量（可多次插入）
+const appendZoneVar = (zone, key, value) => {
+  if (!value) return
+  settingsForm[zone][key] = (settingsForm[zone][key] || '') + value
+}
 
 // 练习默认样式：供编辑器画布跟随（后端渲染同样读 page_config.default_style）
 const practiceDefaultStyle = computed(() => ({
@@ -545,12 +674,30 @@ const unifyLayout = async () => {
 const openSettings = () => {
   settingsForm.title = practice.value.title
   settingsForm.subtitle = practice.value.subtitle || ''
-  settingsForm.showInfoBar = practice.value.page_config?.show_info_bar ?? true
-  settingsForm.marginPreset = practice.value.page_config?.margin_preset || 'normal'
-  settingsForm.showPageNumber = practice.value.page_config?.show_page_number ?? true
-  settingsForm.showScore = practice.value.page_config?.show_score ?? false
-  settingsForm.showTotalScore = practice.value.page_config?.show_total_score ?? false
-  const ds = practice.value.page_config?.default_style || {}
+  const pc = practice.value.page_config || {}
+  settingsForm.showInfoBar = pc.show_info_bar ?? true
+  settingsForm.marginPreset = pc.margin_preset || 'normal'
+  settingsForm.margins = { top: 25, bottom: 25, left: 25, right: 25, ...(pc.margins || {}) }
+  settingsForm.orientation = pc.orientation || 'portrait'
+  settingsForm.showPageNumber = pc.show_page_number ?? true
+  settingsForm.showScore = pc.show_score ?? false
+  settingsForm.showTotalScore = pc.show_total_score ?? false
+  const vars = pc.variables || {}
+  settingsForm.school = vars.school || ''
+  settingsForm.teacher = vars.teacher || ''
+  const h = pc.header || {}
+  settingsForm.header = {
+    enabled: h.enabled ?? false, left: h.left || '', center: h.center || '', right: h.right || '',
+    fontSize: h.font_size ?? 9, distance: h.distance ?? 8, line: !!h.line,
+    firstPageDifferent: h.first_page_different ?? false, firstHidden: h.first_hidden ?? false }
+  const f = pc.footer
+  settingsForm.footer = {
+    enabled: f?.enabled ?? pc.show_page_number ?? true,
+    left: f?.left || '', center: f?.center ?? '{page} / {total}', right: f?.right || '',
+    fontSize: f?.font_size ?? 9, distance: f?.distance ?? 8, line: !!f?.line,
+    firstHidden: f?.first_hidden ?? false }
+  settingsForm.hfTemplate = 'custom'
+  const ds = pc.default_style || {}
   settingsForm.defaultFont = ds.font_family ?? DEFAULT_STYLE.font_family
   settingsForm.defaultFontSize = ds.font_size ?? DEFAULT_STYLE.font_size
   settingsForm.defaultLineHeight = ds.line_height ?? DEFAULT_STYLE.line_height
@@ -563,9 +710,27 @@ const saveSettings = async () => {
     page_config: { ...(practice.value.page_config || {}),
       show_info_bar: settingsForm.showInfoBar,
       margin_preset: settingsForm.marginPreset,
+      margins: settingsForm.margins,
+      orientation: settingsForm.orientation,
       show_page_number: settingsForm.showPageNumber,
       show_score: settingsForm.showScore,
       show_total_score: settingsForm.showTotalScore,
+      variables: { school: settingsForm.school, teacher: settingsForm.teacher },
+      header: {
+        enabled: settingsForm.header.enabled,
+        left: settingsForm.header.left, center: settingsForm.header.center, right: settingsForm.header.right,
+        font_size: settingsForm.header.fontSize, distance: settingsForm.header.distance,
+        line: settingsForm.header.line,
+        first_page_different: settingsForm.header.firstPageDifferent,
+        first_hidden: settingsForm.header.firstHidden,
+      },
+      footer: {
+        enabled: settingsForm.footer.enabled,
+        left: settingsForm.footer.left, center: settingsForm.footer.center, right: settingsForm.footer.right,
+        font_size: settingsForm.footer.fontSize, distance: settingsForm.footer.distance,
+        line: settingsForm.footer.line,
+        first_hidden: settingsForm.footer.firstHidden,
+      },
       default_style: {
         font_family: settingsForm.defaultFont,
         font_size: settingsForm.defaultFontSize,
@@ -758,6 +923,10 @@ onMounted(async () => {
 .edit-panel { flex: 1; overflow-y: auto; padding: 16px; background: #fafafa; }
 .pv-resizer { width: 5px; cursor: col-resize; background: #ebeef5; flex-shrink: 0; transition: background .15s; }
 .addq-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.margin-grid { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.margin-grid .el-input-number { width: 92px; }
+.zone-row { display: flex; width: 100%; }
+.zone-row .el-input { flex: 1; }
 .addq-content { font-size: 12px; line-height: 1.5; white-space: normal; color: #303133; }
 .pv-resizer:hover { background: #c0c4cc; }
 .preview-panel { flex-shrink: 0; border-left: 1px solid #ebeef5; display: flex; flex-direction: column; background: #f0f2f5; }

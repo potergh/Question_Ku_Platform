@@ -7,12 +7,14 @@ import json
 import re
 import shutil
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 from app.models.practice import Practice
 from app.services import doc_render, practice_service, typography, workbook_layout
 
 MARGIN_PRESETS = {"narrow": "15mm", "normal": "25mm", "wide": "32mm"}
+MARGIN_PRESET_MM = {"narrow": 15.0, "normal": 25.0, "wide": 32.0}
 
 PAGE_FOOTER = ('<div style="width:100%;text-align:center;font-size:8px;color:#555;">'
                '第 <span class="pageNumber"></span> 页 / 共 <span class="totalPages"></span> 页</div>')
@@ -26,16 +28,74 @@ def katex_dist_dir() -> Path:
     return d
 
 
+def _page_margins(cfg: dict) -> tuple[float, float, float, float]:
+    """返回 (top, bottom, left, right) mm。margin_preset=custom 时用自定义各边。"""
+    preset = cfg.get("margin_preset", "normal")
+    if preset == "custom":
+        m = cfg.get("margins") or {}
+        return (float(m.get("top", 25)), float(m.get("bottom", 25)),
+                float(m.get("left", 25)), float(m.get("right", 25)))
+    mm = MARGIN_PRESET_MM.get(preset, 25.0)
+    return (mm, mm, mm, mm)
+
+
+def _resolve_page_vars(text: str, practice: Practice, variables: dict) -> str:
+    """替换 {title}/{subject}/{grade}/{date}/{school}/{teacher}；{page}/{total} 保留占位。
+    date 用渲染当天（导出日期，用户决策 A）。"""
+    if not text:
+        return text
+    d = {
+        "title": practice.title or "",
+        "subject": practice.subject or "",
+        "grade": practice.grade or "",
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "school": (variables or {}).get("school") or "",
+        "teacher": (variables or {}).get("teacher") or "",
+    }
+    out = text
+    for k, v in d.items():
+        out = out.replace("{" + k + "}", _html.escape(str(v)))
+    return out
+
+
 def render_settings(practice: Practice) -> dict:
-    """page_config → 渲染设置（含默认值）。"""
+    """page_config → 渲染设置（含默认值）。
+
+    阶段 6：新增 orientation / margins(自定义各边) / header / footer / variables。
+    兼容旧练习：page_config 无 header 键 → header.enabled=False（不显示页眉）；
+    page_config 无 footer 键 → footer=None（沿用旧 show_page_number 页码行为）。
+    """
     cfg = practice.page_config or {}
+    t, b, l, r = _page_margins(cfg)
+    variables = {"school": "", "teacher": "", **(cfg.get("variables") or {})}
+    if "header" in cfg:
+        header = {**practice_service.DEFAULT_HEADER, **(cfg.get("header") or {})}
+    else:
+        header = {"enabled": False, "left": "", "center": "", "right": "",
+                  "font_size": 9, "distance": 8, "line": False,
+                  "first_page_different": False, "first_hidden": False}
+    footer = None
+    if "footer" in cfg:
+        footer = {**practice_service.DEFAULT_FOOTER, **(cfg.get("footer") or {})}
+    # 练习级变量解析到各栏文本（{page}/{total} 保留占位由 PDF/Word 各自处理）
+    for zone in (header, footer):
+        if not zone:
+            continue
+        for key in ("left", "center", "right"):
+            zone[key] = _resolve_page_vars(zone.get(key, ""), practice, variables)
     return {
         "margin": MARGIN_PRESETS.get(cfg.get("margin_preset", "normal"), "25mm"),
+        "margin_preset": cfg.get("margin_preset", "normal"),
+        "margins": {"top": t, "bottom": b, "left": l, "right": r},
+        "orientation": cfg.get("orientation", "portrait"),
         "show_info_bar": cfg.get("show_info_bar", True),
         "show_page_number": cfg.get("show_page_number", True),
         "show_score": cfg.get("show_score", False),
         "show_total_score": cfg.get("show_total_score", False),
         "default_style": typography.practice_default_style(practice),   # 阶段 2 全局默认样式
+        "variables": variables,
+        "header": header,
+        "footer": footer,
     }
 
 
@@ -312,8 +372,58 @@ async def render_pdf_bytes(html: str, settings: dict) -> bytes:
     return await asyncio.to_thread(_render_pdf_bytes_sync, html, settings)
 
 
+def _hf_frag(text: str) -> str:
+    """页眉/页脚栏文本 → HTML 片段：普通文本转义，{page}/{total} → Playwright span。"""
+    if not text:
+        return ""
+    out: list[str] = []
+    for part in re.split(r"(\{page\}|\{total\})", text):
+        if part == "{page}":
+            out.append('<span class="pageNumber"></span>')
+        elif part == "{total}":
+            out.append('<span class="totalPages"></span>')
+        else:
+            out.append(_html.escape(part))
+    return "".join(out)
+
+
+def _hf_template(zone: dict, top: bool) -> str:
+    """Playwright header/footer 模板：三栏（左/中/右）+ 可选分隔线。"""
+    fs = int(zone.get("font_size", 9))
+    style = (f"width:100%;font-size:{fs}px;color:#000;line-height:1.4;"
+             f"box-sizing:border-box;font-family:'Microsoft YaHei',Arial,sans-serif;")
+    if zone.get("line"):
+        style += ("border-bottom:1px solid #999;" if top else "border-top:1px solid #999;")
+    cells = "".join(
+        f'<div style="flex:1;text-align:{al};overflow:hidden;">{_hf_frag(zone.get(key, ""))}</div>'
+        for al, key in (("left", "left"), ("center", "center"), ("right", "right")))
+    return (f'<div style="{style}display:flex;justify-content:space-between;align-items:center;">'
+            f"{cells}</div>")
+
+
+def _strip_first_page_zone(pdf_bytes: bytes, top: bool, h_mm: float) -> bytes:
+    """用 pymupdf 把第一页顶部/底部页眉页脚区域覆盖为白色（实现“首页不同”）。"""
+    import io
+    import pymupdf
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    page = doc[0]
+    pt = h_mm * 72 / 25.4
+    if top:
+        rect = pymupdf.Rect(0, 0, page.rect.width, pt)
+    else:
+        rect = pymupdf.Rect(0, page.rect.height - pt, page.rect.width, page.rect.height)
+    page.draw_rect(rect, color=(1, 1, 1), fill=(1, 1, 1), overlay=True)
+    out = io.BytesIO()
+    doc.save(out, garbage=3, deflate=True)
+    doc.close()
+    return out.getvalue()
+
+
 def _render_pdf_bytes_sync(html: str, settings: dict) -> bytes:
-    """临时目录内 practice.html + katex/ 子目录，file:// 加载（离线可用）。"""
+    """临时目录内 practice.html + katex/ 子目录，file:// 加载（离线可用）。
+
+    阶段 6：支持纸张方向、自定义页边距、页眉/页脚三栏模板、首页不同。
+    """
     from playwright.sync_api import sync_playwright
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
@@ -325,23 +435,62 @@ def _render_pdf_bytes_sync(html: str, settings: dict) -> bytes:
                 page = browser.new_page()
                 page.goto((root / "practice.html").as_uri(), wait_until="load")
                 page.wait_for_function("window.__katexDone === true", timeout=15000)
-                margin = settings["margin"]
-                # 页码脚注预留 10mm：Chromium pdf margin 只收数值长度，不支持 calc()
-                bottom_mm = float(margin.removesuffix("mm")) + (10 if settings["show_page_number"] else 0)
-                return page.pdf(
+                margins = settings["margins"]
+                orientation = settings.get("orientation", "portrait")
+                header = settings.get("header")
+                footer = settings.get("footer")
+                # footer 为 None → 沿用旧 show_page_number 行为（保持旧练习输出不变）
+                footer_old = footer is None and settings.get("show_page_number", True)
+                show_hf = bool(header and header.get("enabled")) or footer_old or bool(footer and footer.get("enabled"))
+                header_tpl = "<div></div>"
+                footer_tpl = "<div></div>"
+                if header and header.get("enabled"):
+                    header_tpl = _hf_template(header, top=True)
+                if footer_old:
+                    footer_tpl = PAGE_FOOTER
+                elif footer and footer.get("enabled"):
+                    footer_tpl = _hf_template(footer, top=False)
+                mm = lambda v: f"{v}mm"
+                pdf = page.pdf(
                     format="A4", print_background=True,
-                    margin={"top": margin, "bottom": f"{bottom_mm}mm", "left": margin, "right": margin},
-                    display_header_footer=settings["show_page_number"],
-                    header_template="<div></div>", footer_template=PAGE_FOOTER,
+                    landscape=(orientation == "landscape"),
+                    margin={"top": mm(margins["top"]), "bottom": mm(margins["bottom"]),
+                            "left": mm(margins["left"]), "right": mm(margins["right"])},
+                    display_header_footer=show_hf,
+                    header_template=header_tpl, footer_template=footer_tpl,
                 )
+                # 首页不同：pymupdf 覆盖第一页页眉/页脚区域为白色
+                if header and header.get("enabled") and header.get("first_page_different") and header.get("first_hidden"):
+                    pdf = _strip_first_page_zone(pdf, top=True, h_mm=margins["top"])
+                if footer and footer.get("enabled") and footer.get("first_hidden"):
+                    pdf = _strip_first_page_zone(pdf, top=False, h_mm=margins["bottom"])
+                return pdf
             finally:
                 browser.close()
+
+
+def _preview_cache_key(html: str, settings: dict) -> str:
+    """预览 PDF 缓存键：html + 页面临（方向/边距/页眉页脚），改设置即失效。"""
+    def zone(z):
+        if not z:
+            return None
+        return {k: z.get(k) for k in ("enabled", "left", "center", "right",
+                                      "font_size", "distance", "line",
+                                      "first_page_different", "first_hidden")}
+    page_key = {
+        "orientation": settings.get("orientation"),
+        "margins": settings.get("margins"),
+        "margin_preset": settings.get("margin_preset"),
+        "header": zone(settings.get("header")),
+        "footer": zone(settings.get("footer")),
+    }
+    return hashlib.sha1((html + json.dumps(page_key, ensure_ascii=False)).encode("utf-8")).hexdigest()
 
 
 async def ensure_preview_pdf(practice_id: str, html: str, settings: dict) -> tuple[Path, str, int]:
     """缓存预览 PDF；sha 命中则跳过浏览器。返回 (路径, sha, 页数)。"""
     from app.services.preview_service import pdf_page_count
-    sha = hashlib.sha1(html.encode("utf-8")).hexdigest()
+    sha = _preview_cache_key(html, settings)
     pdir = practice_service.practices_root() / practice_id
     pdf_path, meta_path = pdir / "preview.pdf", pdir / "preview_meta.json"
     if pdf_path.exists() and meta_path.exists():
