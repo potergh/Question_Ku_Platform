@@ -26,10 +26,6 @@
           <el-icon><Notebook /></el-icon>
           <span>练习</span>
         </el-menu-item>
-        <el-menu-item index="/ai">
-          <el-icon><MagicStick /></el-icon>
-          <span>AI 助手</span>
-        </el-menu-item>
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
           <span>设置</span>

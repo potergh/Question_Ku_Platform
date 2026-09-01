@@ -6,6 +6,7 @@
         <p class="subtitle">本次练习的候选题目，刷新不丢失</p>
       </div>
       <div>
+        <el-button type="primary" plain @click="openRecommend">智能选题</el-button>
         <el-button @click="$router.push('/library')">继续选题</el-button>
         <el-button danger plain :disabled="!items.length" @click="clearBasket">清空</el-button>
         <el-button type="primary" :disabled="!items.length" @click="showCreate = true">创建练习</el-button>
@@ -60,6 +61,80 @@
         <el-button @click="showCreate = false">取消</el-button>
         <el-button type="primary" :loading="creating" @click="createPractice">创建</el-button>
       </template>
+    </el-dialog>
+
+    <el-dialog v-model="showRecommend" title="智能选题" width="920px" top="6vh">
+      <div class="rec-layout">
+        <div class="rec-form">
+          <el-form label-position="top">
+            <el-form-item label="学科">
+              <el-select v-model="recForm.subject" clearable filterable placeholder="全部学科" style="width: 100%;">
+                <el-option v-for="s in subjectOptions" :key="s.value" :label="s.label" :value="s.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="年级">
+              <el-select v-model="recForm.grade" clearable placeholder="全部年级" style="width: 100%;">
+                <el-option v-for="g in ['初一', '初二', '初三', '中考']" :key="g" :label="g" :value="g" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="考点标签">
+              <el-select v-model="recForm.tag_ids" multiple filterable collapse-tags placeholder="选择考点（可多选）" style="width: 100%;">
+                <el-option v-for="t in tagOptions" :key="t.id" :label="t.name" :value="t.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="难度（多选平均分配）">
+              <el-select v-model="recForm.difficulty_bands" multiple placeholder="全部难度" style="width: 100%;">
+                <el-option label="容易" value="easy" />
+                <el-option label="中等" value="medium" />
+                <el-option label="困难" value="hard" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="题型">
+              <el-select v-model="recForm.question_types" multiple placeholder="全部题型" style="width: 100%;">
+                <el-option v-for="t in ['选择题', '多选题', '填空题', '解答题', '计算题', '实验题', '简答题']" :key="t" :label="t" :value="t" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="题量（推荐条数 = 题量 × 2）">
+              <el-input-number v-model="recForm.count" :min="1" :max="50" style="width: 100%;" />
+            </el-form-item>
+            <el-form-item label="排除已用题目（选题池已有 / 已入练习）">
+              <el-switch v-model="recForm.exclude_used" />
+            </el-form-item>
+            <el-button type="primary" :loading="recLoading" style="width: 100%;" @click="generateRecommend">生成推荐</el-button>
+          </el-form>
+        </div>
+        <div class="rec-results">
+          <el-empty v-if="!recItems.length && !recLoading" description="设置条件后点击「生成推荐」" />
+          <template v-if="recItems.length">
+            <el-checkbox-group v-model="recSelected">
+              <div v-for="it in recItems" :key="it.id" class="rec-item">
+                <el-checkbox :value="it.id">
+                  <div class="rec-slot">
+                    <div class="rec-meta">
+                      <el-tag size="small">{{ typeZh(it.question_type) }}</el-tag>
+                      <el-tag v-if="it.difficulty" size="small" type="warning">{{ it.difficulty }} 星</el-tag>
+                      <span v-if="it.grade" class="rec-grade">{{ it.grade }}</span>
+                      <span v-if="it.source_name" class="rec-grade">《{{ it.source_name }}》</span>
+                    </div>
+                    <div class="rec-content" v-html="renderPreview(it.content)"></div>
+                    <div class="rec-tags">
+                      <el-tag v-for="t in it.tags.slice(0, 4)" :key="t" size="small" type="info" effect="plain">{{ t }}</el-tag>
+                    </div>
+                    <div class="rec-reason">{{ it.reason }}</div>
+                  </div>
+                </el-checkbox>
+              </div>
+            </el-checkbox-group>
+            <div class="rec-footer">
+              <span>已选 {{ recSelected.length }} 题</span>
+              <div>
+                <el-button :disabled="recLoading" @click="generateRecommend">换一批</el-button>
+                <el-button type="primary" :disabled="!recSelected.length" :loading="recAdding" @click="addSelected">加入选题池 ({{ recSelected.length }})</el-button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
     </el-dialog>
   </div>
 </template>
@@ -117,6 +192,72 @@ const clearBasket = async () => {
   await load()
 }
 
+// ---------- 智能选题 ----------
+const showRecommend = ref(false)
+const recLoading = ref(false)
+const recAdding = ref(false)
+const recItems = ref([])
+const recSelected = ref([])
+const tagOptions = ref([])
+const subjectOptions = ref([
+  { value: 'physics', label: '物理' },
+  { value: 'math', label: '数学' },
+  { value: 'chemistry', label: '化学' },
+  { value: 'english', label: '英语' },
+])
+const recForm = ref({
+  subject: '', grade: '', tag_ids: [], difficulty_bands: [],
+  question_types: [], count: 10, exclude_used: true,
+})
+
+const openRecommend = async () => {
+  showRecommend.value = true
+  recItems.value = []
+  recSelected.value = []
+  if (!tagOptions.value.length) {
+    try {
+      const res = await axios.get('/api/tags', { params: { category: 'knowledge' } })
+      tagOptions.value = res.data || []
+    } catch { /* 标签加载失败不影响弹窗打开 */ }
+  }
+}
+
+const generateRecommend = async () => {
+  recLoading.value = true
+  try {
+    const res = await axios.post('/api/recommend', {
+      subject: recForm.value.subject || null,
+      grade: recForm.value.grade || null,
+      tag_ids: recForm.value.tag_ids,
+      difficulty_bands: recForm.value.difficulty_bands,
+      question_types: recForm.value.question_types,
+      count: recForm.value.count,
+      exclude_used: recForm.value.exclude_used,
+    })
+    recItems.value = res.data.items || []
+    recSelected.value = []
+    if (!recItems.value.length) ElMessage.info('没有符合条件的题目，请放宽条件')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '推荐失败')
+  } finally {
+    recLoading.value = false
+  }
+}
+
+const addSelected = async () => {
+  recAdding.value = true
+  try {
+    await axios.post('/api/basket/items', { question_ids: recSelected.value })
+    ElMessage.success(`已加入 ${recSelected.value.length} 题到选题池`)
+    showRecommend.value = false
+    await load()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '加入失败')
+  } finally {
+    recAdding.value = false
+  }
+}
+
 const createPractice = async () => {
   if (!createForm.value.title.trim()) {
     ElMessage.warning('请输入练习标题')
@@ -153,4 +294,17 @@ onMounted(load)
 .item-content { color: #303133; font-size: 14px; }
 .item-content :deep(img) { max-height: 80px; }
 .item-actions { display: flex; flex-direction: column; }
+.rec-layout { display: flex; gap: 16px; }
+.rec-form { width: 250px; flex-shrink: 0; border-right: 1px solid #ebeef5; padding-right: 16px; }
+.rec-results { flex: 1; min-width: 0; max-height: 62vh; overflow-y: auto; }
+.rec-item { padding: 10px 0; border-bottom: 1px solid #f0f2f5; }
+.rec-check { align-items: flex-start; height: auto; white-space: normal; }
+.rec-slot { display: inline-block; width: calc(100% - 24px); vertical-align: top; }
+.rec-meta { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; flex-wrap: wrap; }
+.rec-grade { color: #909399; font-size: 12px; }
+.rec-content { color: #303133; font-size: 13px; }
+.rec-content :deep(img) { max-height: 50px; }
+.rec-tags { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
+.rec-reason { color: #909399; font-size: 12px; margin-top: 4px; }
+.rec-footer { position: sticky; bottom: 0; background: #fff; padding: 10px 0; display: flex; justify-content: space-between; align-items: center; }
 </style>

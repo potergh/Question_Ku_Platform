@@ -36,11 +36,6 @@ const routes = [
     component: () => import('../views/TagsView.vue'),
   },
   {
-    path: '/ai',
-    name: 'AI',
-    component: () => import('../views/AIView.vue'),
-  },
-  {
     path: '/settings',
     name: 'Settings',
     component: () => import('../views/SettingsView.vue'),

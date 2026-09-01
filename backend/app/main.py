@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 
 from app.config import settings
 from app.database import init_db
-from app.routers import upload, questions, tags, settings as settings_router, basket, practices
+from app.routers import upload, questions, tags, settings as settings_router, basket, practices, recommend
 
 
 logging.basicConfig(level=logging.INFO)
@@ -74,6 +74,7 @@ app.include_router(tags.router)
 app.include_router(settings_router.router)
 app.include_router(basket.router)
 app.include_router(practices.router)
+app.include_router(recommend.router)
 
 
 @app.get("/api/health")
