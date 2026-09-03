@@ -63,7 +63,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showRecommend" title="智能选题" width="920px" top="6vh" draggable class="rec-dialog">
+    <el-dialog v-model="showRecommend" title="智能选题" top="6vh" draggable class="rec-dialog">
       <div class="rec-layout">
         <div class="rec-form">
           <el-form label-position="top">
@@ -114,7 +114,6 @@
                       <el-tag size="small">{{ typeZh(it.question_type) }}</el-tag>
                       <el-tag v-if="it.difficulty" size="small" type="warning">{{ it.difficulty }} 星</el-tag>
                       <span v-if="it.grade" class="rec-grade">{{ it.grade }}</span>
-                      <span v-if="it.source_name" class="rec-source" :title="it.source_name">《{{ it.source_name }}》</span>
                     </div>
                     <div class="rec-content" v-html="renderPreview(it.content)"></div>
                     <div class="rec-tags">
@@ -295,7 +294,7 @@ onMounted(load)
 .item-content :deep(img) { max-height: 80px; }
 .item-actions { display: flex; flex-direction: column; }
 .rec-layout { display: flex; gap: 16px; }
-.rec-form { width: 250px; flex-shrink: 0; border-right: 1px solid #ebeef5; padding-right: 16px; }
+.rec-form { width: 220px; flex-shrink: 0; border-right: 1px solid #ebeef5; padding-right: 14px; }
 .rec-results { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 4px 4px 0; }
 .rec-item { padding: 12px; margin-bottom: 10px; background: #fff; border: 1px solid #ebeef5; border-radius: 8px; transition: border-color .2s; }
 .rec-item:hover { border-color: #c6e2ff; }
@@ -303,7 +302,6 @@ onMounted(load)
 .rec-slot { display: inline-block; width: calc(100% - 24px); vertical-align: top; }
 .rec-meta { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
 .rec-grade { color: #909399; font-size: 12px; }
-.rec-source { margin-left: auto; color: #909399; font-size: 12px; max-width: 100%; flex-shrink: 0; word-break: break-word; }
 .rec-content { color: #303133; font-size: 13px; line-height: 1.6; word-break: break-word; }
 .rec-content :deep(img) { max-height: 60px; max-width: 100%; }
 .rec-tags { margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap; }
@@ -316,7 +314,8 @@ onMounted(load)
 .rec-dialog.el-dialog {
   resize: both;
   overflow: hidden;
-  min-width: 660px;
+  --el-dialog-width: min(1100px, 94vw) !important;
+  min-width: 540px;
   min-height: 440px;
   max-height: 92vh;
   display: flex;
