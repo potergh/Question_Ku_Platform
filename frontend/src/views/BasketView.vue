@@ -63,7 +63,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showRecommend" title="智能选题" width="920px" top="6vh">
+    <el-dialog v-model="showRecommend" title="智能选题" width="920px" top="6vh" draggable class="rec-dialog">
       <div class="rec-layout">
         <div class="rec-form">
           <el-form label-position="top">
@@ -303,10 +303,15 @@ onMounted(load)
 .rec-slot { display: inline-block; width: calc(100% - 24px); vertical-align: top; }
 .rec-meta { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
 .rec-grade { color: #909399; font-size: 12px; }
-.rec-source { margin-left: auto; color: #909399; font-size: 12px; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rec-content { color: #303133; font-size: 13px; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.rec-content :deep(img) { max-height: 40px; }
+.rec-source { margin-left: auto; color: #909399; font-size: 12px; max-width: 100%; flex-shrink: 0; word-break: break-word; }
+.rec-content { color: #303133; font-size: 13px; line-height: 1.6; word-break: break-word; }
+.rec-content :deep(img) { max-height: 60px; max-width: 100%; }
 .rec-tags { margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap; }
 .rec-reason { margin-top: 6px; padding: 4px 8px; background: #f5f7fa; border-radius: 4px; color: #909399; font-size: 12px; }
 .rec-footer { position: sticky; bottom: 0; margin-top: 4px; background: #fff; padding: 10px 0; border-top: 1px solid #ebeef5; display: flex; justify-content: space-between; align-items: center; }
+</style>
+
+<style>
+/* 全局（teleport 到 body，scoped 不生效）：智能选题弹窗可拖拽拉伸 */
+.rec-dialog.el-dialog { resize: both; overflow: auto; min-width: 660px; min-height: 440px; }
 </style>
