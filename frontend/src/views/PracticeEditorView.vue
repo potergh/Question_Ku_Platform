@@ -599,7 +599,16 @@ const addSelectedQuestions = async () => {
     addQ.show = false
     const added = (practice.value?.sections || []).flatMap(s => s.questions.map(q => q.id))
       .filter(id => !before.has(id))
-    if (mode.value === 'workbook') afterQuestionsAdded(added)
+    if (mode.value === 'workbook') {
+      if (pendingQIndex.value !== null) {
+        afterQuestionsAdded(added)
+      } else {
+        // 未走画布插入路径（pendingQIndex 为空）时，后端已把新题追加到
+        // layout_document，直接以最新布局刷新整册画布，避免「需刷新浏览器才显示」
+        layout.value = normalizeLayout(practice.value?.layout_document || [])
+        layoutDirty.value = false
+      }
+    }
     schedulePreview()
     ElMessage.success(`已添加 ${addQ.selected.length} 题`)
   } catch (e) {

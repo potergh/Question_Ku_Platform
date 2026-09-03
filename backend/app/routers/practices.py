@@ -25,7 +25,7 @@ from app.schemas.practice import (
     PracticeQuestionOut, PracticeResponse, PracticeSectionOut, PracticeUpdateRequest,
     PreviewRenderResponse,
 )
-from app.services import practice_service
+from app.services import practice_service, workbook_layout
 from app.services import block_service
 from app.services import docx_export
 from app.services import preview_service, render_service, workbook_layout
@@ -461,11 +461,13 @@ async def add_questions_from_library(practice_id: str, req: AddQuestionsRequest,
     questions = await _load_questions_ordered(db, req.question_ids)
     if not questions:
         raise HTTPException(400, "没有可用题目：题目不存在或已删除")
-    added = await practice_service.add_questions_to_practice(db, practice, questions)
-    if not added:
+    added_pqs = await practice_service.add_questions_to_practice(db, practice, questions)
+    if not added_pqs:
         raise HTTPException(400, "所选题目均已在练习内")
     await db.flush()
     await _renumber(db, practice_id)
+    # 同步整册布局：新题追加到 layout_document，保证整册编排/导出能显示
+    await workbook_layout.append_questions_to_layout(db, practice, added_pqs)
     return await _practice_resp_after(db, practice_id)
 
 
@@ -562,6 +564,14 @@ async def delete_question(practice_id: str, pq_id: str, db: AsyncSession = Depen
     pq = await _load_pq(db, practice_id, pq_id)
     await db.delete(pq)   # 块级联删除（外键 ondelete=CASCADE + ORM delete-orphan）
     await db.flush()
+    # 同步移除整册布局中该题的引用块，避免画布残留「题目已被删除」占位
+    practice = await _get_practice_full(db, practice_id)
+    if practice and practice.layout_document:
+        layout = [b for b in practice.layout_document
+                  if not (b.get("type") == "question_ref" and b.get("question_id") == pq_id)]
+        if len(layout) != len(practice.layout_document):
+            practice.layout_document = layout
+            await db.flush()
     await _renumber(db, practice_id)
     return await _practice_resp_after(db, practice_id)
 
