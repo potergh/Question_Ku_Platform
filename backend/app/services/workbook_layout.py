@@ -14,6 +14,7 @@
 import re
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.models.practice import Practice, PracticeQuestion, PracticeSection
 
@@ -114,6 +115,81 @@ async def ensure_layout(db, practice: Practice) -> list[dict]:
     practice.layout_document = layout
     await db.flush()
     return layout
+
+
+async def append_questions_to_layout(db, practice: Practice, added_pqs: list) -> None:
+    """向整册布局追加新加入的题目（question_ref），保证整册编排/导出能显示新题。
+
+    - layout_document 为空 → 按数据库最新 sections（含新题）重建
+    - 已存在 → 校验规整后，把新题插入其所属小节（无小节则新建 subtitle），
+      保证整册画布与练习结构一致（不会因追加到全局末尾而错挂到错误小节）。
+    """
+    if not added_pqs:
+        return
+    if practice.layout_document:
+        layout = validate_layout(practice.layout_document)
+    else:
+        # 从数据库重建：不依赖传入 practice 对象的集合（可能因 commit 过期）
+        sections = (await db.execute(
+            select(PracticeSection)
+            .where(PracticeSection.practice_id == practice.id)
+            .options(selectinload(PracticeSection.questions))
+            .order_by(PracticeSection.position)
+        )).scalars().all()
+        layout = []
+        for sec in sections:
+            layout.append({
+                "type": "subtitle", "id": f"sub_{sec.id}", "section_id": sec.id,
+                "title": sec.title, "show_title": sec.show_title,
+                "start_on_new_page": sec.start_on_new_page,
+                "section_type": sec.section_type,
+            })
+            for q in sec.questions:
+                layout.append({"type": "question_ref", "id": f"qr_{q.id}", "question_id": q.id})
+    existing_qids = {b.get("question_id") for b in layout if b.get("type") == "question_ref"}
+    # 新题 -> 所属小节（供定位/新建 subtitle）
+    sec_info = {}
+    for pq in added_pqs:
+        if pq.id in existing_qids:
+            continue
+        r = await db.execute(select(PracticeSection).where(PracticeSection.id == pq.section_id))
+        sec = r.scalar_one_or_none()
+        if sec:
+            sec_info[pq.id] = sec
+    # section_id -> subtitle 所在 layout 下标
+    def _sub_index():
+        return {b.get("section_id"): i for i, b in enumerate(layout) if b.get("type") == "subtitle" and b.get("section_id")}
+    sub_index = _sub_index()
+    for pq in added_pqs:
+        if pq.id in existing_qids:
+            continue
+        blk = {"type": "question_ref", "id": f"qr_{pq.id}", "question_id": pq.id}
+        sec = sec_info.get(pq.id)
+        if sec is None:
+            layout.append(blk)
+            continue
+        if sec.id in sub_index:
+            # 所属小节已存在：插到该小节内最后一个题目之后（下一个 subtitle 之前）
+            start = sub_index[sec.id]
+            end = len(layout)
+            for i in range(start + 1, len(layout)):
+                if layout[i].get("type") == "subtitle":
+                    end = i
+                    break
+            layout.insert(end, blk)
+            sub_index = _sub_index()  # 插入使后续下标偏移，重算
+        else:
+            # 无对应小节：新建 subtitle + question_ref（追加末尾，可在整册里拖动归位）
+            layout.append({
+                "type": "subtitle", "id": f"sub_{sec.id}", "section_id": sec.id,
+                "title": sec.title, "show_title": sec.show_title,
+                "start_on_new_page": sec.start_on_new_page,
+                "section_type": sec.section_type,
+            })
+            layout.append(blk)
+            sub_index = _sub_index()
+    practice.layout_document = layout
+    await db.flush()
 
 
 def validate_layout(layout) -> list[dict]:

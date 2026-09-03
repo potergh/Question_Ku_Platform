@@ -569,8 +569,17 @@ async def delete_question(practice_id: str, pq_id: str, db: AsyncSession = Depen
     if practice and practice.layout_document:
         layout = [b for b in practice.layout_document
                   if not (b.get("type") == "question_ref" and b.get("question_id") == pq_id)]
-        if len(layout) != len(practice.layout_document):
-            practice.layout_document = layout
+        # 移除已变空的子标题（其后紧跟下一子标题或结尾 → 无任何内容），
+        # 因为对应空题型 section 会被 _renumber 删除，subtitle 不应残留
+        out = []
+        for i, b in enumerate(layout):
+            if b.get("type") == "subtitle":
+                nxt = layout[i + 1] if i + 1 < len(layout) else None
+                if nxt is None or nxt.get("type") == "subtitle":
+                    continue
+            out.append(b)
+        if len(out) != len(layout):
+            practice.layout_document = out
             await db.flush()
     await _renumber(db, practice_id)
     return await _practice_resp_after(db, practice_id)

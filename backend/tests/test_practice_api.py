@@ -80,3 +80,37 @@ async def test_list_update_delete(client, test_db, tmp_path):
     assert res.json()["ok"] is True
     assert not (tmp_path / "practices" / pid).exists()
     assert (await client.get("/api/practices")).json()["total"] == 0
+
+
+async def test_delete_last_question_cleans_empty_subtitle(client, test_db, tmp_path):
+    """删除某题型最后一题 → 整册布局中该空小节标题同步移除（不留占位）。"""
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from app.models import Practice, PracticeSection
+    q1 = await seed_basket_question(test_db, tmp_path, question_type="single_choice")
+    q2 = await seed_basket_question(test_db, tmp_path, question_type="comprehensive")
+    await client.post("/api/basket/items", json={"question_ids": [q1, q2]})
+    res = await client.post("/api/practices", json={"title": "删除空小节", "from_basket": True})
+    pid = res.json()["id"]
+    # 删除前：触发布局生成，应含「综合题」小节
+    async with test_db() as db:
+        secs = (await db.execute(
+            select(PracticeSection).where(PracticeSection.practice_id == pid)
+            .options(selectinload(PracticeSection.questions)))).scalars().all()
+        comp = next(s for s in secs if s.title == "综合题")
+        pq_id = comp.questions[0].id
+        p = (await db.execute(
+            select(Practice).where(Practice.id == pid)
+            .options(selectinload(Practice.sections).selectinload(PracticeSection.questions))
+        )).scalar_one()
+        if not p.layout_document:
+            from app.services.workbook_layout import ensure_layout
+            await ensure_layout(db, p)
+            await db.commit()
+        assert any(b.get("type") == "subtitle" and b.get("title") == "综合题" for b in p.layout_document)
+    res = await client.delete(f"/api/practices/{pid}/questions/{pq_id}")
+    assert res.status_code == 200
+    async with test_db() as db:
+        p = (await db.execute(select(Practice).where(Practice.id == pid))).scalar_one()
+        assert not any(b.get("type") == "subtitle" and b.get("title") == "综合题" for b in p.layout_document)
+        assert any(b.get("type") == "subtitle" and b.get("title") == "选择题" for b in p.layout_document)

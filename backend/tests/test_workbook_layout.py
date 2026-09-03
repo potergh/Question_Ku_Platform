@@ -257,3 +257,73 @@ async def test_docx_custom_text_formula(test_db, tmp_path):
     xml = z.read("word/document.xml").decode("utf-8")
     assert "<m:oMath" in xml
     assert "frac{s}{t}" not in xml
+
+
+# ---------------- 添加题目 → 布局同步（append_questions_to_layout） ----------------
+
+async def _seed_with_existing_layout(test_db, tmp_path):
+    """建练习 + 选择题(q1)/填空题(q2) + 已有 layout（选择题小节+q1），模拟添加题目前状态。"""
+    pid, ids = await _seed_practice(test_db, tmp_path)
+    async with test_db() as db:
+        p = await _load_practice_for_sync(db, pid)
+        p.layout_document = [
+            {"type": "subtitle", "id": "s1", "section_id": ids["sec1"], "title": "选择题",
+             "show_title": True, "start_on_new_page": False},
+            {"type": "question_ref", "id": "r1", "question_id": ids["q1"]},
+        ]
+        await db.commit()
+    return pid, ids
+
+
+async def _add_new_question(test_db, pid, sec_id, qtext, qtype):
+    """插入一道真实新题，返回 PracticeQuestion（未提交 layout 同步）。"""
+    async with test_db() as db:
+        q = PracticeQuestion(practice_id=pid, section_id=sec_id, position=99,
+                             question_number=99, question_type=qtype, score=5,
+                             rich_document=_doc(qtext), doc_version=1, is_modified=False)
+        db.add(q)
+        await db.flush()
+        qid = q.id
+        await db.commit()
+    return qid
+
+
+async def test_append_into_existing_section(test_db, tmp_path):
+    """新题属于已有小节 → 插入该小节末尾，而非全局末尾。"""
+    pid, ids = await _seed_with_existing_layout(test_db, tmp_path)
+    qid = await _add_new_question(test_db, pid, ids["sec1"], "新增选择题", "single_choice")
+    async with test_db() as db:
+        p = await _load_practice_for_sync(db, pid)
+        from sqlalchemy import select as _sel
+        from app.models.practice import PracticeQuestion as _PQ
+        pq = (await db.execute(_sel(_PQ).where(_PQ.id == qid))).scalar_one()
+        await workbook_layout.append_questions_to_layout(db, p, [pq])
+        await db.commit()
+        p2 = await _load_practice_for_sync(db, pid)
+        types = [(b["type"], b.get("question_id"), b.get("section_id")) for b in p2.layout_document]
+        # 选择题小节 3 块：subtitle, q1, q_new
+        assert types == [
+            ("subtitle", None, ids["sec1"]),
+            ("question_ref", ids["q1"], None),
+            ("question_ref", qid, None),
+        ]
+
+
+async def test_append_creates_missing_section(test_db, tmp_path):
+    """新题属于尚无小节的小节 → 自动新建 subtitle + question_ref。"""
+    pid, ids = await _seed_with_existing_layout(test_db, tmp_path)
+    qid = await _add_new_question(test_db, pid, ids["sec2"], "新增填空题", "fill")
+    async with test_db() as db:
+        p = await _load_practice_for_sync(db, pid)
+        from sqlalchemy import select as _sel
+        from app.models.practice import PracticeQuestion as _PQ
+        pq = (await db.execute(_sel(_PQ).where(_PQ.id == qid))).scalar_one()
+        await workbook_layout.append_questions_to_layout(db, p, [pq])
+        await db.commit()
+        p2 = await _load_practice_for_sync(db, pid)
+        types = [(b["type"], b.get("question_id"), b.get("section_id"), b.get("title")) for b in p2.layout_document]
+        assert ("subtitle", None, ids["sec2"], "填空题") in types
+        assert ("question_ref", qid, None, None) in types
+        # 填空题小节紧随其后
+        sub2 = types.index(("subtitle", None, ids["sec2"], "填空题"))
+        assert types[sub2 + 1] == ("question_ref", qid, None, None)
