@@ -114,7 +114,7 @@
                       <el-tag size="small">{{ typeZh(it.question_type) }}</el-tag>
                       <el-tag v-if="it.difficulty" size="small" type="warning">{{ it.difficulty }} 星</el-tag>
                       <span v-if="it.grade" class="rec-grade">{{ it.grade }}</span>
-                      <span v-if="it.source_name" class="rec-grade">《{{ it.source_name }}》</span>
+                      <span v-if="it.source_name" class="rec-source" :title="it.source_name">《{{ it.source_name }}》</span>
                     </div>
                     <div class="rec-content" v-html="renderPreview(it.content)"></div>
                     <div class="rec-tags">
@@ -296,15 +296,17 @@ onMounted(load)
 .item-actions { display: flex; flex-direction: column; }
 .rec-layout { display: flex; gap: 16px; }
 .rec-form { width: 250px; flex-shrink: 0; border-right: 1px solid #ebeef5; padding-right: 16px; }
-.rec-results { flex: 1; min-width: 0; max-height: 62vh; overflow-y: auto; }
-.rec-item { padding: 10px 0; border-bottom: 1px solid #f0f2f5; }
+.rec-results { flex: 1; min-width: 0; max-height: 62vh; overflow-y: auto; padding: 4px 4px 0; }
+.rec-item { padding: 12px; margin-bottom: 10px; background: #fff; border: 1px solid #ebeef5; border-radius: 8px; transition: border-color .2s; }
+.rec-item:hover { border-color: #c6e2ff; }
 .rec-check { align-items: flex-start; height: auto; white-space: normal; }
 .rec-slot { display: inline-block; width: calc(100% - 24px); vertical-align: top; }
-.rec-meta { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; flex-wrap: wrap; }
+.rec-meta { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
 .rec-grade { color: #909399; font-size: 12px; }
-.rec-content { color: #303133; font-size: 13px; }
-.rec-content :deep(img) { max-height: 50px; }
-.rec-tags { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
-.rec-reason { color: #909399; font-size: 12px; margin-top: 4px; }
-.rec-footer { position: sticky; bottom: 0; background: #fff; padding: 10px 0; display: flex; justify-content: space-between; align-items: center; }
+.rec-source { margin-left: auto; color: #909399; font-size: 12px; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rec-content { color: #303133; font-size: 13px; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.rec-content :deep(img) { max-height: 40px; }
+.rec-tags { margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap; }
+.rec-reason { margin-top: 6px; padding: 4px 8px; background: #f5f7fa; border-radius: 4px; color: #909399; font-size: 12px; }
+.rec-footer { position: sticky; bottom: 0; margin-top: 4px; background: #fff; padding: 10px 0; border-top: 1px solid #ebeef5; display: flex; justify-content: space-between; align-items: center; }
 </style>

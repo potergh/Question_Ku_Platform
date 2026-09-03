@@ -5,6 +5,8 @@
 默认排除选题池已有与已入练习的题目，返回 count×2 条推荐及推荐理由。
 """
 
+import re
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -52,14 +54,22 @@ class RecommendResponse(BaseModel):
     total_candidates: int = 0
 
 
-def _strip_markdown(text: str | None, limit: int = 90) -> str:
-    """题干摘要：去公式/图片标记，截断。"""
+def _strip_markdown(text: str | None, limit: int = 80) -> str:
+    """题干摘要：去公式/OCR 残留标记/链接，折叠空白，截断。"""
     if not text:
         return ""
-    t = text.replace("\\(", "").replace("\\)", "").replace("\\[", "").replace("\\]", "")
-    t = t.replace("![", "[").replace("]", "]")
+    t = text
+    t = t.replace("\\(", "").replace("\\)", "").replace("\\[", "").replace("\\]", "")
+    # OCR 图片残留标记：[figure]path / [img]path / [图片] / ![alt](url)
+    t = re.sub(r"\[figure\][^\s\]\[]*", "", t, flags=re.I)
+    t = re.sub(r"\[img\][^\s\]\[]*", "", t, flags=re.I)
+    t = re.sub(r"\[(图片|图|figure|img)\]", "", t, flags=re.I)
+    t = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", t)
+    # markdown 强调与链接
     t = t.replace("**", "").replace("__", "").replace("~~", "")
-    t = t.replace("\n", " ").strip()
+    t = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", t)
+    t = t.replace("\n", " ")
+    t = re.sub(r"\s+", " ", t).strip()
     return t[:limit] + ("…" if len(t) > limit else "")
 
 
@@ -141,7 +151,8 @@ async def recommend_questions(req: RecommendRequest, db=Depends(get_db)):
         if q.difficulty:
             parts.append(f"难度：{DIFFICULTY_ZH.get(q.difficulty, q.difficulty)}")
         if q.source and q.source.filename:
-            parts.append(f"来自《{q.source.filename}》")
+            _fn = re.sub(r"\.(pdf|docx?|pptx?|txt)$", "", q.source.filename, flags=re.I)
+            parts.append(f"来自《{_fn}》")
         return " · ".join(parts) or "符合筛选条件"
 
     scored = [(score(q), q) for q in candidates]
@@ -179,7 +190,7 @@ async def recommend_questions(req: RecommendRequest, db=Depends(get_db)):
                 grade=q.grade,
                 content=_strip_markdown(q.content),
                 tags=[t.name for t in (q.tags or [])],
-                source_name=q.source.filename if q.source else None,
+                source_name=re.sub(r'\.(pdf|docx?|pptx?|txt)$', '', q.source.filename, flags=re.I) if q.source and q.source.filename else None,
                 reason=reason(q),
             )
         )
