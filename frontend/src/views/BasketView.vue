@@ -296,7 +296,7 @@ onMounted(load)
 .item-actions { display: flex; flex-direction: column; }
 .rec-layout { display: flex; gap: 16px; }
 .rec-form { width: 250px; flex-shrink: 0; border-right: 1px solid #ebeef5; padding-right: 16px; }
-.rec-results { flex: 1; min-width: 0; max-height: 62vh; overflow-y: auto; padding: 4px 4px 0; }
+.rec-results { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 4px 4px 0; }
 .rec-item { padding: 12px; margin-bottom: 10px; background: #fff; border: 1px solid #ebeef5; border-radius: 8px; transition: border-color .2s; }
 .rec-item:hover { border-color: #c6e2ff; }
 .rec-check { align-items: flex-start; height: auto; white-space: normal; }
@@ -313,5 +313,23 @@ onMounted(load)
 
 <style>
 /* 全局（teleport 到 body，scoped 不生效）：智能选题弹窗可拖拽拉伸 */
-.rec-dialog.el-dialog { resize: both; overflow: auto; min-width: 660px; min-height: 440px; }
+.rec-dialog.el-dialog {
+  resize: both;
+  overflow: hidden;
+  min-width: 660px;
+  min-height: 440px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+.rec-dialog .el-dialog__header { flex-shrink: 0; }
+.rec-dialog .el-dialog__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.rec-dialog .rec-layout { flex: 1; min-height: 0; display: flex; gap: 16px; overflow: hidden; }
+.rec-dialog .rec-results { flex: 1; min-height: 0; overflow-y: auto; }
 </style>
