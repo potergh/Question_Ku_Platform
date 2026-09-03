@@ -5,6 +5,7 @@
 默认排除选题池已有与已入练习的题目，返回 count×2 条推荐及推荐理由。
 """
 
+import random
 import re
 
 from fastapi import APIRouter, Depends
@@ -156,7 +157,8 @@ async def recommend_questions(req: RecommendRequest, db=Depends(get_db)):
         return " · ".join(parts) or "符合筛选条件"
 
     scored = [(score(q), q) for q in candidates]
-    scored.sort(key=lambda x: -x[0])
+    random.shuffle(scored)
+    scored.sort(key=lambda x: (-x[0], random.random()))
 
     # 4. 难度平均分配（选多档时每档均分）
     want = max(1, req.count) * 2
@@ -171,9 +173,9 @@ async def recommend_questions(req: RecommendRequest, db=Depends(get_db)):
             rest.extend(group[per:])
             picked.extend(group[:per])
         if len(picked) < want and rest:
-            rest.sort(key=lambda x: -x[0])
+            rest.sort(key=lambda x: (-x[0], random.random()))
             picked.extend(rest[: want - len(picked)])
-        picked.sort(key=lambda x: -x[0])
+        picked.sort(key=lambda x: (-x[0], random.random()))
         picked = picked[:want]
     else:
         picked = scored[:want]
