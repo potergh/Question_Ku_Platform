@@ -114,11 +114,12 @@
                       <el-tag size="small">{{ typeZh(it.question_type) }}</el-tag>
                       <el-tag v-if="it.difficulty" size="small" type="warning">{{ it.difficulty }} 星</el-tag>
                       <span v-if="it.grade" class="rec-grade">{{ it.grade }}</span>
+                      <span v-if="it.source_name" class="rec-source" :title="it.source_name">{{ it.source_name }}</span>
                     </div>
-                    <div class="rec-content" v-html="renderPreview(it.content)"></div>
                     <div class="rec-tags">
                       <el-tag v-for="t in it.tags.slice(0, 4)" :key="t" size="small" type="info" effect="plain">{{ t }}</el-tag>
                     </div>
+                    <div class="rec-content" v-html="renderPreview(it.content)"></div>
                     <div class="rec-reason">{{ it.reason }}</div>
                   </div>
                 </el-checkbox>
@@ -296,16 +297,17 @@ onMounted(load)
 .rec-layout { display: flex; gap: 16px; }
 .rec-form { width: 220px; flex-shrink: 0; border-right: 1px solid #ebeef5; padding-right: 14px; }
 .rec-results { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 4px 4px 0; }
-.rec-item { padding: 12px; margin-bottom: 10px; background: #fff; border: 1px solid #ebeef5; border-radius: 8px; transition: border-color .2s; }
-.rec-item:hover { border-color: #c6e2ff; }
+.rec-item { padding: 16px; margin-bottom: 14px; background: #fff; border: 1px solid #e4e7ed; border-radius: 10px; transition: border-color .2s, box-shadow .2s; }
+.rec-item:hover { border-color: #c6e2ff; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
 .rec-check { align-items: flex-start; height: auto; white-space: normal; }
-.rec-slot { display: inline-block; width: calc(100% - 24px); vertical-align: top; }
-.rec-meta { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+.rec-slot { display: inline-block; width: calc(100% - 26px); vertical-align: top; }
+.rec-meta { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
 .rec-grade { color: #909399; font-size: 12px; }
-.rec-content { color: #303133; font-size: 13px; line-height: 1.6; word-break: break-word; }
+.rec-source { margin-left: auto; color: #909399; font-size: 12px; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
+.rec-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.rec-content { color: #303133; font-size: 14px; line-height: 1.7; word-break: break-word; }
 .rec-content :deep(img) { max-height: 60px; max-width: 100%; }
-.rec-tags { margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap; }
-.rec-reason { margin-top: 6px; padding: 4px 8px; background: #f5f7fa; border-radius: 4px; color: #909399; font-size: 12px; }
+.rec-reason { margin-top: 12px; padding: 6px 10px; background: #f5f7fa; border-radius: 5px; color: #909399; font-size: 12px; }
 .rec-footer { position: sticky; bottom: 0; margin-top: 4px; background: #fff; padding: 10px 0; border-top: 1px solid #ebeef5; display: flex; justify-content: space-between; align-items: center; }
 </style>
 
@@ -314,7 +316,7 @@ onMounted(load)
 .rec-dialog.el-dialog {
   resize: both;
   overflow: hidden;
-  --el-dialog-width: min(1100px, 94vw) !important;
+  --el-dialog-width: min(1180px, 94vw) !important;
   min-width: 540px;
   min-height: 440px;
   max-height: 92vh;
