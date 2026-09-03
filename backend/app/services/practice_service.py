@@ -127,6 +127,9 @@ async def snapshot_question(
             c = await migrate_option_refs(db, practice.id, o.get("content"), ocr_dir)
             new_opts.append({**o, "content": c} if c != o.get("content") else o)
         pq.options_snapshot = new_opts
+    # 快照创建即生成 rich_document（从快照回退路径），
+    # 保证添加/创建后立即点击题目即可在编辑器显示，无需刷新后惰性迁移。
+    sync_rich_document(pq, [])
     return pq
 
 
@@ -277,10 +280,13 @@ async def create_practice_from_questions(
 
 async def add_questions_to_practice(
     db: AsyncSession, practice: Practice, questions: list,
-) -> int:
-    """已有练习继续从题库添加：按题型归入对应小节（缺则新建），已在练习内的跳过。返回实际添加数。"""
+) -> list:
+    """已有练习继续从题库添加：按题型归入对应小节（缺则新建），已在练习内的跳过。
+
+    返回实际新增的 PracticeQuestion 列表（用于同步整册布局 layout_document）。
+    """
     existing = {pq.source_question_id for s in practice.sections for pq in s.questions}
-    added = 0
+    added: list = []
     for q in questions:
         if q.id in existing:
             continue
@@ -300,7 +306,9 @@ async def add_questions_to_practice(
             .where(PracticeQuestion.section_id == section.id)
         )).scalar()
         position = (max_pos if max_pos is not None else -1) + 1
-        await snapshot_question(db, practice, section, q, position)
+        pq = await snapshot_question(db, practice, section, q, position)
+        # 注意：不直接操作 section.questions 集合（commit 后关系可能过期触发懒加载），
+        # 后续 response / layout 重建均通过数据库查询获得最新题目。
         existing.add(q.id)
-        added += 1
+        added.append(pq)
     return added

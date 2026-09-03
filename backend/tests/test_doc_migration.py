@@ -124,6 +124,7 @@ async def test_dry_run_does_not_write(client, test_db, tmp_path):
     practice = await _two_questions(client, test_db, tmp_path)
     async with test_db() as db:
         p = await doc_migration.load_practice_for_migration(db, practice["id"])
+        before = {pq.id: pq.rich_document for sec in p.sections for pq in sec.questions}
         res = await doc_migration.dry_run_practice(db, p)
         await db.rollback()
     assert res["questions"] == 2
@@ -133,8 +134,8 @@ async def test_dry_run_does_not_write(client, test_db, tmp_path):
         assert p.migration_status != "done"
         for sec in p.sections:
             for pq in sec.questions:
-                assert pq.rich_document is None
-                assert pq.doc_version == 0
+                # 试运行不得改动已有的 rich_document（快照创建即生成，属正常功能）
+                assert pq.rich_document == before[pq.id]
         n_blocks = (await db.execute(
             select(PracticeContentBlock).where(
                 PracticeContentBlock.practice_question_id.in_(
