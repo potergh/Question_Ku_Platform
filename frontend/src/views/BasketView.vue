@@ -108,13 +108,12 @@
           <template v-if="recItems.length">
             <el-checkbox-group v-model="recSelected">
               <div v-for="it in recItems" :key="it.id" class="rec-item">
-                <el-checkbox :value="it.id">
+                <el-checkbox :value="it.id" class="rec-check">
                   <div class="rec-slot">
                     <div class="rec-meta">
                       <el-tag size="small">{{ typeZh(it.question_type) }}</el-tag>
                       <el-tag v-if="it.difficulty" size="small" type="warning">{{ it.difficulty }} 星</el-tag>
                       <span v-if="it.grade" class="rec-grade">{{ it.grade }}</span>
-                      <span v-if="it.source_name" class="rec-source" :title="it.source_name">{{ it.source_name }}</span>
                     </div>
                     <div class="rec-tags">
                       <el-tag v-for="t in it.tags.slice(0, 4)" :key="t" size="small" type="info" effect="plain">{{ t }}</el-tag>
@@ -299,11 +298,11 @@ onMounted(load)
 .rec-results { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 4px 4px 0; }
 .rec-item { padding: 16px; margin-bottom: 14px; background: #fff; border: 1px solid #e4e7ed; border-radius: 10px; transition: border-color .2s, box-shadow .2s; }
 .rec-item:hover { border-color: #c6e2ff; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
-.rec-check { align-items: flex-start; height: auto; white-space: normal; }
-.rec-slot { display: inline-block; width: calc(100% - 26px); vertical-align: top; }
+.rec-check { display: flex; width: 100%; align-items: flex-start; height: auto; white-space: normal; }
+.rec-check .el-checkbox__label { flex: 1; min-width: 0; line-height: normal; }
+.rec-slot { display: block; width: 100%; }
 .rec-meta { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
 .rec-grade { color: #909399; font-size: 12px; }
-.rec-source { margin-left: auto; color: #909399; font-size: 12px; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }
 .rec-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .rec-content { color: #303133; font-size: 14px; line-height: 1.7; word-break: break-word; }
 .rec-content :deep(img) { max-height: 60px; max-width: 100%; }
@@ -316,7 +315,7 @@ onMounted(load)
 .rec-dialog.el-dialog {
   resize: both;
   overflow: hidden;
-  --el-dialog-width: min(1180px, 94vw) !important;
+  --el-dialog-width: min(1240px, 96vw) !important;
   min-width: 540px;
   min-height: 440px;
   max-height: 92vh;
