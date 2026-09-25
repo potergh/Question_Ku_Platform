@@ -80,6 +80,26 @@ BOUNDARY_SYSTEM = """你是中文试卷与讲义的版面结构分析专家。�
 8. 完整性硬要求：清单里的每一个 line_id 都必须被覆盖——要么落在某道题的 [start_line, end_line] 区间内，要么落在某个 non_question_regions 区间内。区间之间不得重叠。不允许遗漏任何行。
 9. 只输出 JSON，不要输出解释、注释或 Markdown 代码块以外的文字。"""
 
+# 英语篇章题补充规则：仅在识别英语试卷时追加到 system prompt 末尾。
+# 物理/数学/化学等学科走上面的 BOUNDARY_SYSTEM 基线，与本追加段完全隔离，
+# 保证「英语的拆题改造」不会回头扰动已经跑通的物理切分。
+_ENGLISH_SUBJECTS = {"english", "英语"}
+BOUNDARY_ENGLISH_APPENDIX = """英语篇章题补充规则（仅英语试卷适用，优先级高于上文通用规则）：
+E1. 篇章题拆分：阅读理解、完形填空、任务型阅读、听力长对话等「一篇材料（文章/对话）带多个各自带编号的小题」的结构，**每个小题各输出一条 question**，type 用 cloze / reading / task_reading / listening 等；label 用该小题在原文里的编号。承载材料正文的行归入**该组第一个小题**的区间（其 start_line 从材料首行起），其余小题从各自题干行起，各带自己的选项与编号。绝不允许把「整篇材料 + 若干小题」合并成一条，也不许只输出第一个小题。
+E2. type 追加取值：在通用枚举之外，英语题允许 listening / grammar_choice / cloze / reading / task_reading / use_of_english / sentence_completion / writing。
+E3. 完整性强化：每个大题板块（一、二、三……直到最后一个，含「补全对话 / 情景交际」等中间板块，绝不能整段凭空消失）都必须有题目输出；听力与选择小题的选项必须抄全（通常 A/B/C/D 四项），不得只抄三项。"""
+
+
+def boundary_system_prompt(subject: str | None) -> str:
+    """按学科渲染边界判定 system prompt。
+
+    英语追加篇章题拆分/防漏规则（``BOUNDARY_ENGLISH_APPENDIX``）；其余学科
+    （含物理）返回逐字不变的 ``BOUNDARY_SYSTEM`` 基线，避免英语改造扰动他科。
+    """
+    if subject and subject.strip().lower() in _ENGLISH_SUBJECTS:
+        return f"{BOUNDARY_SYSTEM}\n\n{BOUNDARY_ENGLISH_APPENDIX}"
+    return BOUNDARY_SYSTEM
+
 
 def boundary_user_text(
     line_text: str,

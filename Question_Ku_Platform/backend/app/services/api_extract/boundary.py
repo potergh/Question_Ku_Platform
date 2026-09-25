@@ -38,6 +38,7 @@ from . import ExtractCancelled
 from .prompts import (
     BOUNDARY_SYSTEM,
     PAGE_TRANSCRIBE_SYSTEM,
+    boundary_system_prompt,
     boundary_user_text,
     page_transcribe_user_text,
 )
@@ -931,15 +932,19 @@ async def _request_boundary_batch(
     last_page: int,
     result: BoundaryResult,
     retries: int = 2,
+    system: str = BOUNDARY_SYSTEM,
 ):
     """单批边界判定：裸数组容错 + 失败重试。
 
     一个批次挂掉会让整份文档（实测 38 页要 9 分钟）全部报废，所以这里
     自己重试，而不是把 VLMError 直接抛给调用方。
+
+    system 由调用方按学科渲染（见 boundary_system_prompt），默认退回基线，
+    保证未显式传学科时行为与历史逐字一致。
     """
     span = f"第 {first_page + 1}-{last_page + 1} 页"
     for attempt in range(retries + 1):
-        payload = await call_vlm_json(config, system=BOUNDARY_SYSTEM, user_text=user_text)
+        payload = await call_vlm_json(config, system=system, user_text=user_text)
         if not isinstance(payload, dict):
             repaired = _as_question_payload(payload)
             if repaired is not None:
@@ -1058,6 +1063,8 @@ async def detect_boundaries(
     page_count = max(line.page_index for line in lines) + 1
     batches = plan_batches(lines)
     owned = _owned_ranges(batches, lines)
+    # 按学科渲染边界 system prompt：仅英语追加篇章题拆分/防漏规则，他科逐字不变。
+    boundary_system = boundary_system_prompt(subject)
 
     reports: list[tuple[tuple[int, int], list[dict], list[dict]]] = []
     kinds: list[str] = []
@@ -1081,6 +1088,7 @@ async def detect_boundaries(
                 first_page,
                 last_page,
                 result,
+                system=boundary_system,
             )
         return index, first_page, last_page, owned_range, payload
 
