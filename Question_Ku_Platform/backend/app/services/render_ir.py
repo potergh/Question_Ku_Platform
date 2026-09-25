@@ -591,7 +591,9 @@ def runs_html(runs, assets: Path) -> str:
         elif isinstance(r, InlineImage):
             if r.width not in (None, "", "fit"):
                 w = f"{r.width:g}%" if isinstance(r.width, (int, float)) else str(r.width)
-                style = f"width:{w};max-width:100%;height:auto;vertical-align:middle"
+                # max-height:none 压过 `.q-option img { max-height:3.4em }` 默认钳制，
+                # 否则拖宽的选项图在 PDF 里会被高度压回去 → 与编辑器显示不一致
+                style = f"width:{w};max-width:100%;max-height:none;height:auto;vertical-align:middle"
             else:
                 style = "max-height:3.4em;vertical-align:middle"
             out.append(f'<img src="{_asset_uri(r.src, assets)}" style="{style}">')

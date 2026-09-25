@@ -54,7 +54,7 @@ def test_inline_image_width_in_html():
     runs = [render_ir.InlineImage(src="asset://practice/a.webp", width=40),
             render_ir.InlineImage(src="asset://practice/b.webp")]
     html = render_ir.runs_html(runs, Path.cwd())
-    assert 'style="width:40%;max-width:100%;height:auto;vertical-align:middle"' in html
+    assert 'style="width:40%;max-width:100%;max-height:none;height:auto;vertical-align:middle"' in html
     assert 'style="max-height:3.4em;vertical-align:middle"' in html
 
 

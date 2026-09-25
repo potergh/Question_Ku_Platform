@@ -65,10 +65,10 @@ export const InlineImage = Node.create({
   },
   addNodeView() {
     return VueNodeViewRenderer(InlineImageView, {
-      // 缩放手柄上的事件交给 Vue 组件，别让 ProseMirror 抢焦点触发重渲染
+      // 工具条与缩放手柄上的事件交给 Vue 组件，别让 ProseMirror 抢焦点触发重渲染
       stopEvent: ({ event }) =>
         !!(event && event.target && event.target.closest &&
-           event.target.closest('.qre-inline-img-handle')),
+           (event.target.closest('.qre-inline-img-tools') || event.target.closest('.qre-inline-img-handle'))),
     })
   },
 })

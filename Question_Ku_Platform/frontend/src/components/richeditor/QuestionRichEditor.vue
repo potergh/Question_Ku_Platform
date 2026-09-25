@@ -502,7 +502,8 @@ const removeCurrentOption = async () => {
 .qre-canvas :deep(.qre-space-zero) { color: #c0c4cc; font-size: 12px; }
 .qre-canvas :deep(.qre-space-tools) { position: absolute; right: 0; top: 0; display: none; }
 .qre-canvas :deep(.qre-space:hover .qre-space-tools) { display: block; }
-.qre-canvas :deep(.qre-inline-img) { height: 1.5em; vertical-align: text-bottom; }
+/* 默认行内图尺寸与 PDF 渲染端（.q-option img max-height:3.4em）对齐，保证左右一致 */
+.qre-canvas :deep(.qre-inline-img) { max-height: 3.4em; height: auto; vertical-align: middle; }
 /* 行内图 NodeView：wrapper 行内定位以承载缩放手柄；选中描边 + 右下角手柄 */
 .qre-canvas :deep(.qre-inline-img-wrap) { position: relative; display: inline-block; }
 .qre-canvas :deep(.qre-inline-img-wrap[data-selected]) { outline: 2px solid #409eff; border-radius: 3px; }
@@ -513,6 +514,10 @@ const removeCurrentOption = async () => {
   cursor: ew-resize; z-index: 10;
 }
 .qre-canvas :deep(.qre-inline-img-missing) { color: #909399; font-size: 12px; }
+/* 行内图工具条：与块级图 .qre-img-tools 同构（fixed + 白底阴影），z-index 高一层以免被块图工具条盖住 */
+.qre-canvas :deep(.qre-inline-img-tools) { position: fixed; display: flex; z-index: 3100;
+  gap: 4px; background: rgba(255,255,255,.96); padding: 3px 6px; border-radius: 4px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.2); align-items: center; white-space: nowrap; }
 .qre-canvas :deep(.qre-formula-display) { text-align: center; margin: 6px 0; }
 .qre-canvas :deep(.qre-formula-inline),
 .qre-canvas :deep(.qre-formula-display) { cursor: pointer; border-radius: 4px; }
