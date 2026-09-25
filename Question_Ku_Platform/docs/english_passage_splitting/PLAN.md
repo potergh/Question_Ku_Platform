@@ -91,3 +91,27 @@
 
 ## git
 - 每完成一个可验证子步单独提交。
+
+---
+
+# Phase 3：两级模型（方案 C 落地）——语篇题=一道完整题
+
+用户反馈：**「把每个小题拆成散单题反而错了」**，要的是「完整的一道完形/阅读：材料 + 各小题带选项」。于是推翻 Phase 2 的“逐小题拆成独立 item”，改回**一道语篇题 = 共享材料 + sub_questions[]** 的两级结构，**听力暂不管**，重点保阅读与完形（及任务型阅读/综合填空/补全对话）。全程 `is_english_subject` 门控，物理等学科逐字不变。
+
+## 里程碑（均已实现+提交）
+- **M1 数据贯通** `34b7efd`：`Question`/`ExtractItemData`/`QuestionData` 新增 `sub_questions`（JSON）+ 迁移 `a7f3c2d1b9e4`；`to_question_data`/`build_question`/`_serialize_item`/`QuestionResponse`/`ExtractItemPatch` 全链路透传，小题内 asset:// 图统一解析。
+- **M2 管线两级结构化** `927e3a6`：边界 appendix E1 改为“整篇材料连同全部小题作为**一条** question”；结构化 appendix `STRUCTURE_ENGLISH_APPENDIX` 让模型输出 `stem_md`=材料 + `sub_questions`[{label,stem,options,answer}]；`structure._clean_sub_questions` 归一降级；`passage_answers.distribute_answers_into_subquestions` 把整组答案按 (k) 拆进各小题。新增契约测试 `test_structure_passage.py`（非英语 structure prompt 不含 sub_questions）。
+- **M3 前端** `30bbcb3`：复核页/题库详情页按「材料 + 小题列表（各自选项/答案）」渲染与可编辑，去掉旧的“小题选项暂不展示”误导占位。
+
+## 重跑英语实测（模型 qwen-vl-max，2026-09-25）
+69 条散题 → **44 条**（语篇题各自并回一道）；`blocked=False`，**答案 44/44**，**9 篇语篇题带 sub_questions**：
+- 完形 `32`：材料 + 10 小题，选项 10/10、答案 10/10；阅读 `33/34/35`：各 5 小题，选项/答案齐全（34/35 上轮 0 答案已修复）；
+- 补全对话 `36`：对话材料 + 5 小题带选项答案；任务型阅读 `42`/综合填空 `43`：材料 + 小题（无选项、有答案，符合题型）。
+- 遗留观察（非阻断）：`15/16` 材料为空但小题带选项答案（模型偶发把内容都塞进小题），复核页可人工补材料。
+
+**关键修复** `31af08e`：拆小题答案后**不再清空顶层 answer**（保留整组串），否则已答好的语篇题被答案覆盖审计误计为缺答、把匹配率压到 79.5% 触发 blocked。修复后 44/44、blocked 解除。
+
+## 待做
+- **M4 导出**：语篇题在 PDF/Word 里“材料一次 + 小题列表”排版（当前导出仍按单题走，sub_questions 未参渲）。
+
+后端 pytest **536 passed**；前端 `vite build` 通过。物理/数学/化学：`test_boundary_subject_prompt.py` + `test_structure_passage.py` 双向锁死非英语 prompt 逐字不变。
