@@ -21,6 +21,7 @@ class ExtractItemPatch(BaseModel):
     score: float | None = None
     stem_md: str | None = None
     options: list[dict] | None = None
+    sub_questions: list[dict] | None = None
     content: str | None = None
     answer: str | None = None
     explanation: str | None = None
@@ -42,6 +43,8 @@ class ExtractItemResponse(BaseModel):
 
     stem_md: str = ""
     options: list[dict] = []
+    # 语篇题（完形/阅读等）的材料+小题 两级结构；普通题为空列表。
+    sub_questions: list[dict] = []
     content: str = ""
     raw_text: str = ""
 

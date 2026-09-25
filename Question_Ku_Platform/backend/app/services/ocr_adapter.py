@@ -44,6 +44,9 @@ class QuestionData:
     # 不抽答案区的图，保持空列表。卷面答案是图时 answer 只写「如上图所示」，
     # 图本身在这里。
     answer_image_paths: list[str] = field(default_factory=list)
+    # 语篇题（完形/阅读等）的两级结构：{label,stem,options,answer,explanation} 列表。
+    # 仅 api_extract 英语通道会填；local_ocr 保持 None，走原单题路径。
+    sub_questions: list[dict] | None = None
 
 
 class OCRAdapter:

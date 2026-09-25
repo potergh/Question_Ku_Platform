@@ -29,6 +29,9 @@ class QuestionResponse(BaseModel):
     grade: str | None
     content: str | None
     options: list | None
+    # 语篇题（完形/阅读等）的两级结构：{label,stem,options,answer,explanation} 列表。
+    # 普通题为 None；前端据此判断是否按「材料+小题」渲染。
+    sub_questions: list | None = None
     answer: str | None
     explanation: str | None
     score: float | None
@@ -64,6 +67,16 @@ class QuestionResponse(BaseModel):
                 for opt in self.options:
                     if isinstance(opt, dict) and opt.get('content') and 'asset://' in str(opt['content']):
                         opt['content'] = resolve_asset_urls(opt['content'], self.source_id)
+            # 语篇题小题的选项/题干也可能带 asset:// 内联图，统一解析成 HTTP URL。
+            if self.sub_questions and isinstance(self.sub_questions, list):
+                for sub in self.sub_questions:
+                    if not isinstance(sub, dict):
+                        continue
+                    if sub.get('stem') and 'asset://' in str(sub['stem']):
+                        sub['stem'] = resolve_asset_urls(sub['stem'], self.source_id)
+                    for opt in (sub.get('options') or []):
+                        if isinstance(opt, dict) and opt.get('content') and 'asset://' in str(opt['content']):
+                            opt['content'] = resolve_asset_urls(opt['content'], self.source_id)
         # Map question type to Chinese
         if self.question_type:
             self.question_type_zh = QUESTION_TYPE_MAP.get(self.question_type, self.question_type)
@@ -73,6 +86,7 @@ class QuestionResponse(BaseModel):
 class QuestionUpdate(BaseModel):
     content: str | None = None
     options: list | None = None
+    sub_questions: list | None = None
     answer: str | None = None
     explanation: str | None = None
     question_type: str | None = None

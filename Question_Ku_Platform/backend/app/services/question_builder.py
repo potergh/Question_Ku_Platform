@@ -28,6 +28,7 @@ def build_question(
         raw_ocr_content=qd.raw_ocr_content,
         content=qd.content,
         options=qd.options,
+        sub_questions=qd.sub_questions,
         answer=qd.answer,
         explanation=qd.explanation,
         score=qd.score,

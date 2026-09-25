@@ -66,6 +66,11 @@ class ExtractItemData:
 
     stem_md: str = ""
     options: list[dict] = field(default_factory=list)
+    # 语篇题（完形填空/阅读理解/任务型阅读/综合填空）的两级结构：
+    # stem_md 存共享材料（文章/长对话），这里存各小题。
+    # 每项 {"label","stem","options":[{label,content}],"answer","explanation"}。
+    # 非语篇题为空列表，入库/渲染完全走原有单题路径。
+    sub_questions: list[dict] = field(default_factory=list)
     # 最终入库用的 Markdown（插图已内联成 asset:// 链接）。
     content: str = ""
     # 原始行文本，与 raw_ocr_content 对应，永不被用户编辑覆盖。
@@ -131,6 +136,8 @@ class ExtractItemData:
             raw_ocr_content=self.raw_text,
             content=self.content,
             options=self.options,
+            # 语篇题的 材料+小题 两级结构透传到入库；非语篇题为空列表。
+            sub_questions=list(self.sub_questions),
             answer=self.answer,
             explanation=self.explanation,
             score=self.score,
@@ -296,6 +303,7 @@ def apply_item_patch(item: ExtractItemData, patch: dict) -> list[str]:
         "score",
         "stem_md",
         "options",
+        "sub_questions",
         "content",
         "answer",
         "explanation",

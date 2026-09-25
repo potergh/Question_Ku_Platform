@@ -25,6 +25,11 @@ class Question(Base):
     raw_ocr_content: Mapped[str | None] = mapped_column(Text, nullable=True)  # OCR original, NEVER overwritten
     content: Mapped[str | None] = mapped_column(Text, nullable=True)  # Markdown with inline images + LaTeX
     options: Mapped[list | None] = mapped_column(JSON, default=list)  # [{"label":"A","content":"..."}]
+    # 语篇题（完形填空/阅读理解/任务型阅读/综合填空）两级结构：
+    # content 存共享材料（文章/长对话），这里存各小题
+    # [{"label","stem","options":[{"label","content"}],"answer","explanation"}]。
+    # 普通题为 NULL，所有渲染/导出仍走单题路径。
+    sub_questions: Mapped[list | None] = mapped_column(JSON, nullable=True)
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
 
