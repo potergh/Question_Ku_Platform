@@ -744,7 +744,7 @@ async def run_extract(
     _lap(timings, "审计", mark)
     write_extract_json(document_dir, result)
     logger.info(
-        "api_extract done: %s items, coverage=%.3f, blocked=%s, answers=%s/%s",
+        "api_extract done: %s: %s items, coverage=%.3f, blocked=%s, answers=%s/%s",
         document_name, len(items), audit.coverage_ratio, audit.blocked,
         answer_report["matched"], answer_report["total"],
     )
