@@ -78,7 +78,8 @@ def test_distribute_blob_into_subquestions():
     assert filled == 3
     answers = [s.get("answer") for s in item.sub_questions]
     assert answers == ["B", "C", "D"]
-    assert item.answer is None  # 整组串拆完从顶层清掉
+    # 顶层整组串保留不清（作为篇章题的答案汇总，也保证答案覆盖率审计不误计缺答）。
+    assert item.answer == "（1）B\n（2）C\n（3）D"
 
 
 def test_distribute_positional_letters_into_subquestions():

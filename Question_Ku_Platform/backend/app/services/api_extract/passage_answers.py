@@ -151,7 +151,6 @@ def distribute_answers_into_subquestions(items: list) -> int:
             if value:
                 sub["answer"] = value
                 filled += 1
-        # 拆完把整组串从顶层 answer 上清掉，避免与小题答案重复展示。
-        if any(str(s.get("answer") or "").strip() for s in subs):
-            item.answer = None
+        # 顶层 answer 保留（整组串）：篇章题的「答案见下」就是这整组，
+        # 而且答案覆盖率审计按顶层 answer 是否存计——清掉会把已答好的语篇题误计为缺答。
     return filled

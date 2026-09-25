@@ -179,7 +179,7 @@
               <div v-for="(opt, i) in edit.options" :key="i" class="rich-opt" v-html="optionHtml(opt)"></div>
             </template>
             <div v-else class="rich-opt muted">（{{ typeText(edit.question_type) }}：一篇材料挂多个小题，小题未结构化，请对照原卷在编辑态人工补录）</div>
-            <div v-if="edit.answer" class="rich-opt">
+            <div v-if="edit.answer && !hasSubQuestions" class="rich-opt">
               答案：<span v-html="renderFullContent(edit.answer)"></span>
             </div>
             <div v-if="edit.explanation" class="rich-opt">
