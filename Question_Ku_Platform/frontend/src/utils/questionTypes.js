@@ -27,3 +27,21 @@ export const PASSAGE_TYPES = [
 ]
 
 export const isPassageType = (type) => PASSAGE_TYPES.includes(type)
+
+// 学科→适用题型码（与后端 app/utils/question_types.py 的 SUBJECT_TYPE_CATALOG 保持一致）
+export const SUBJECT_TYPE_CATALOG = {
+  physics: ['single_choice', 'multiple_choice', 'fill_blank', 'experiment', 'calculation', 'comprehensive', 'short_answer'],
+  math: ['single_choice', 'multiple_choice', 'fill_blank', 'comprehensive'],
+  chemistry: ['single_choice', 'multiple_choice', 'fill_blank', 'short_answer', 'experiment', 'calculation', 'comprehensive'],
+  english: ['listening', 'grammar_choice', 'cloze', 'reading', 'task_reading', 'use_of_english', 'sentence_completion', 'writing'],
+}
+
+// 选定学科→该科题型码；未选学科→全学科并集（按目录出现顺序去重）。
+export function typesForSubject(subject) {
+  if (subject && SUBJECT_TYPE_CATALOG[subject]) return SUBJECT_TYPE_CATALOG[subject]
+  const seen = []
+  for (const list of Object.values(SUBJECT_TYPE_CATALOG)) {
+    for (const t of list) if (!seen.includes(t)) seen.push(t)
+  }
+  return seen
+}

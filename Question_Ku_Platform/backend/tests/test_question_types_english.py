@@ -9,6 +9,8 @@ from pathlib import Path
 from app.services.api_extract_adapter import ExtractItemData
 from app.utils.question_types import (
     PASSAGE_TYPES,
+    QUESTION_TYPE_MAP,
+    SUBJECT_TYPE_CATALOG,
     infer_question_type_from_section,
     normalize_question_type,
 )
@@ -38,9 +40,25 @@ def test_infer_priority_task_reading_vs_reading():
     assert infer_question_type_from_section("八、综合填空") == "use_of_english"
 
 
-def test_infer_none_for_physics_sections():
-    for section in ("一、选择题", "二、填空题", "三、实验题", "四、计算题", None, ""):
+def test_infer_none_for_generic_sections():
+    # 选择/填空题故意不映射（无法区分单/多选，不能冲掉视觉模型已判对的类型）
+    for section in ("一、选择题", "二、填空题", "三、多选题", None, ""):
         assert infer_question_type_from_section(section) is None
+
+
+def test_infer_science_sections():
+    # 理化生专属板块归位（这些常被视觉模型压成 comprehensive/fill_blank）
+    assert infer_question_type_from_section("五、实验题") == "experiment"
+    assert infer_question_type_from_section("六、计算题") == "calculation"
+    assert infer_question_type_from_section("四、简答题") == "short_answer"
+    assert infer_question_type_from_section("三、解答题") == "comprehensive"
+
+
+def test_subject_catalog_is_subset_of_type_map():
+    # 每个学科目录里的码都必须在 QUESTION_TYPE_MAP 里有中文显示名
+    for subject, codes in SUBJECT_TYPE_CATALOG.items():
+        for code in codes:
+            assert code in QUESTION_TYPE_MAP, f"{subject}:{code} 不在 QUESTION_TYPE_MAP"
 
 
 def test_normalize_overrides_generic_with_english_type():

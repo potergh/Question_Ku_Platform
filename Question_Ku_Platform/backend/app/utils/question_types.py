@@ -56,9 +56,10 @@ _GENERIC_TYPE_CODES = {
     "简答题", "论述题", "综合题",
 }
 
-# 板块关键词 → 英语题型码。按顺序匹配（先特异后泛化）：
+# 板块关键词 → 题型码。按顺序匹配（先特异后泛化）：
 # “任务型阅读”必须先于“阅读理解”（都含“阅读”）；“单项/完形/综合填空”用完整词而非“填空”。
-_ENGLISH_SECTION_RULES: list[tuple[tuple[str, ...], str]] = [
+# 故意不映射“选择题”（无法区分单选/多选，会冲掉视觉模型已判对的 multiple_choice）。
+_SECTION_TYPE_RULES: list[tuple[tuple[str, ...], str]] = [
     (("任务型阅读",), "task_reading"),
     (("完形填空", "完形"), "cloze"),
     (("单项填空", "单项选择"), "grammar_choice"),
@@ -67,14 +68,30 @@ _ENGLISH_SECTION_RULES: list[tuple[tuple[str, ...], str]] = [
     (("完成句子", "翻译"), "sentence_completion"),
     (("书面表达", "作文"), "writing"),
     (("听力",), "listening"),
+    # 理化生专属板块（英语规则已在上方命中，不会误入）：把常被压成 comprehensive 的题归位
+    (("实验",), "experiment"),
+    (("计算",), "calculation"),
+    (("简答",), "short_answer"),
+    (("解答", "综合题", "综合应用"), "comprehensive"),
 ]
+
+# 学科→适用题型码（题库筛选与校验的单一真源，与前端 questionTypes.js 保持一致）
+SUBJECT_TYPE_CATALOG: dict[str, list[str]] = {
+    "physics": ["single_choice", "multiple_choice", "fill_blank", "experiment",
+                "calculation", "comprehensive", "short_answer"],
+    "math": ["single_choice", "multiple_choice", "fill_blank", "comprehensive"],
+    "chemistry": ["single_choice", "multiple_choice", "fill_blank", "short_answer",
+                  "experiment", "calculation", "comprehensive"],
+    "english": ["listening", "grammar_choice", "cloze", "reading", "task_reading",
+                "use_of_english", "sentence_completion", "writing"],
+}
 
 
 def infer_question_type_from_section(section: str | None) -> str | None:
-    """从中文板块标题推断英语题型码；无命中（如理化板块）返回 None。"""
+    """从中文板块标题推断题型码；无命中返回 None。"""
     if not section:
         return None
-    for keywords, code in _ENGLISH_SECTION_RULES:
+    for keywords, code in _SECTION_TYPE_RULES:
         if any(kw in section for kw in keywords):
             return code
     return None

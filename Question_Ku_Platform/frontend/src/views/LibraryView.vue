@@ -61,14 +61,11 @@
       宽屏一行放得下。仍保留 flex-wrap 兜底：窗口窄时自然换行，不挤爆容器。
     -->
     <div v-show="showBankFilters" class="mt-2 mb-3 flex flex-wrap items-center gap-2">
-      <el-select v-model="filters.subject" placeholder="学科" clearable style="width: 110px" @change="loadQuestions">
+      <el-select v-model="filters.subject" placeholder="学科" clearable style="width: 110px" @change="onSubjectFilterChange">
         <el-option v-for="s in availableSubjects" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
-      <el-select v-model="filters.question_type" placeholder="题型" clearable style="width: 110px" @change="loadQuestions">
-        <el-option label="选择题" value="选择题" />
-        <el-option label="填空题" value="填空题" />
-        <el-option label="解答题" value="解答题" />
-        <el-option label="实验题" value="实验题" />
+      <el-select v-model="filters.question_type" placeholder="题型" clearable style="width: 120px" @change="loadQuestions">
+        <el-option v-for="t in questionTypeFilterOptions" :key="t" :label="t" :value="t" />
       </el-select>
       <!-- 原「待复核」分段的唯一入口：待审核/已通过/已驳回都在这里 -->
       <el-select v-model="filters.review_status" placeholder="状态" clearable style="width: 110px" @change="loadQuestions">
@@ -607,7 +604,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import { renderFullContent, renderPreview, renderOptionContent } from '../utils/render.js'
-import { QUESTION_TYPE_MAP, isPassageType } from '../utils/questionTypes'
+import { QUESTION_TYPE_MAP, isPassageType, typesForSubject } from '../utils/questionTypes'
 
 const questions = ref([])
 const sources = ref([])
@@ -1045,6 +1042,17 @@ const categoryText = (c) => ({ knowledge: '知识点', skill: '技能', error_ty
 const subjectText = (s) => ({ physics: '物理', math: '数学', chemistry: '化学', english: '英语' })[s] || s || '未分类'
 // 题型中文：优先后端 question_type_zh，否则本地映射兜底（详情弹窗保存后重取可能不带 zh）
 const questionTypeText = (q) => q?.question_type_zh || QUESTION_TYPE_MAP[q?.question_type] || q?.question_type || '-'
+
+// 题库筛选题型下拉：随所选学科联动（未选学科时取全学科并集）；后端按中文名反查 en 码
+const questionTypeFilterOptions = computed(() =>
+  typesForSubject(filters.subject).map((code) => QUESTION_TYPE_MAP[code] || code))
+const onSubjectFilterChange = () => {
+  // 切学科后若已选题型不在新目录内，清空避免筛出空结果
+  if (filters.question_type && !questionTypeFilterOptions.value.includes(filters.question_type)) {
+    filters.question_type = ''
+  }
+  loadQuestions()
+}
 
 // ── Tag Management ──
 
