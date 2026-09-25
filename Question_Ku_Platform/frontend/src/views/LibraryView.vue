@@ -245,7 +245,7 @@
         <!-- Raw editor -->
         <el-input v-else v-model="detailQuestion.content" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" />
 
-        <div v-if="detailQuestion.options?.length" style="margin-top: 12px;">
+        <div v-if="detailQuestion.options?.length && !isPassageType(detailQuestion.question_type)" style="margin-top: 12px;">
           <h4 style="display: flex; align-items: center; gap: 8px;">
             选项
             <el-tag v-if="detailQuestion.options.length < 4" type="warning" size="small" effect="dark">
@@ -607,7 +607,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import { renderFullContent, renderPreview, renderOptionContent } from '../utils/render.js'
-import { QUESTION_TYPE_MAP } from '../utils/questionTypes'
+import { QUESTION_TYPE_MAP, isPassageType } from '../utils/questionTypes'
 
 const questions = ref([])
 const sources = ref([])

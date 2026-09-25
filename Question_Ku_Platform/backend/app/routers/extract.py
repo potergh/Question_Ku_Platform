@@ -36,6 +36,7 @@ from app.services.api_extract_adapter import (
 from app.services.channels import job_type_for, runner_for
 from app.services.question_builder import build_question
 from app.utils.assets import resolve_asset_urls, resolve_card_image_path
+from app.utils.question_types import normalize_question_type
 from app.utils.warnings import split_warnings
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,8 @@ def _serialize_item(
     正文中的 `asset://` 内联插图同样要转换，否则预览页图片全裂。
     """
     payload = item.to_dict()
+    # 英语篇章题：按板块归一题型，让已 staging 的旧数据不重跑也能在预览页显示正确题型。
+    payload["question_type"] = normalize_question_type(item.question_type, item.section)
     payload.pop("card_image", None)
     payload.pop("figures", None)
     payload.pop("answer_figures", None)

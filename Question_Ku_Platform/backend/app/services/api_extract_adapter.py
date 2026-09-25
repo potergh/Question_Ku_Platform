@@ -25,6 +25,7 @@ if str(_PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(_PACKAGES_DIR))
 
 from app.services.ocr_adapter import QuestionData  # noqa: E402
+from app.utils.question_types import normalize_question_type  # noqa: E402
 
 # 暂存文件名。放在 ocr_output/<doc>/ 下：delete_source 已对该目录做 rmtree，
 # 生命周期天然对齐；且 resolve_card_image_path 依赖路径里存在 'ocr_output'
@@ -125,7 +126,8 @@ class ExtractItemData:
             # 存原始编号（【例1】/随堂检测-1）比存 Q001 更有信息量。
             source_question_id=self.label or f"Q{self.qid:03d}",
             question_number=self.question_number,
-            question_type=self.question_type,
+            # 英语篇章题：通用码（单选/多选/填空）按板块归一为专属题型，已手改则保留。
+            question_type=normalize_question_type(self.question_type, self.section),
             raw_ocr_content=self.raw_text,
             content=self.content,
             options=self.options,

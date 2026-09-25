@@ -164,7 +164,10 @@
           -->
           <div v-show="detailMode === 'preview'" class="col-preview">
             <div class="rich" v-html="renderFullContent(edit.stem_md)"></div>
-            <div v-for="(opt, i) in edit.options" :key="i" class="rich-opt" v-html="optionHtml(opt)"></div>
+            <template v-if="!isPassageType(edit.question_type)">
+              <div v-for="(opt, i) in edit.options" :key="i" class="rich-opt" v-html="optionHtml(opt)"></div>
+            </template>
+            <div v-else class="rich-opt muted">（{{ typeText(edit.question_type) }}：一篇材料挂多个小题，小题选项待结构化，暂不展示，答案见下）</div>
             <div v-if="edit.answer" class="rich-opt">
               答案：<span v-html="renderFullContent(edit.answer)"></span>
             </div>
@@ -212,15 +215,18 @@
               <div class="field-label">题干（Markdown / LaTeX）</div>
               <el-input v-model="edit.stem_md" type="textarea" :rows="7" />
 
-              <div class="field-label">选项</div>
-              <div v-for="(opt, i) in edit.options" :key="i" class="opt-row">
-                <el-input v-model="opt.label" size="small" style="width: 58px" />
-                <el-input v-model="opt.content" size="small" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" />
-                <el-button text type="danger" size="small" @click="edit.options.splice(i, 1)">
-                  <el-icon><Close /></el-icon>
-                </el-button>
-              </div>
-              <el-button text size="small" type="primary" @click="addOption">+ 添加选项</el-button>
+              <template v-if="!isPassageType(edit.question_type)">
+                <div class="field-label">选项</div>
+                <div v-for="(opt, i) in edit.options" :key="i" class="opt-row">
+                  <el-input v-model="opt.label" size="small" style="width: 58px" />
+                  <el-input v-model="opt.content" size="small" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" />
+                  <el-button text type="danger" size="small" @click="edit.options.splice(i, 1)">
+                    <el-icon><Close /></el-icon>
+                  </el-button>
+                </div>
+                <el-button text size="small" type="primary" @click="addOption">+ 添加选项</el-button>
+              </template>
+              <div v-else class="field-label muted">选项（{{ typeText(edit.question_type) }}为篇章题，小题选项待结构化，暂不展示）</div>
 
               <div class="field-label">答案（来源：{{ originText(active.answer_origin) }}）</div>
               <el-input v-model="edit.answer" type="textarea" :rows="3" />
@@ -311,7 +317,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import { CHANNEL_REVIEW_LABELS } from '../utils/channels'
-import { QUESTION_TYPE_MAP } from '../utils/questionTypes'
+import { QUESTION_TYPE_MAP, isPassageType } from '../utils/questionTypes'
 import { renderFullContent, renderOptionContent, renderPreview } from '../utils/render'
 
 // 与后端 audit.COVERAGE_FLOOR 保持一致，仅用于横幅文案展示。
