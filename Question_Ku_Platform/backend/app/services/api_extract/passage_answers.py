@@ -104,3 +104,54 @@ def distribute_group_answers(items: list) -> int:
                 if flags and "no_answer" in flags:
                     m.audit_flags = [f for f in flags if f != "no_answer"]
     return filled
+
+
+def _sub_index(label: str) -> int | None:
+    """从小题 label（如「（3）」「3.)」）里取小问序号；取不到返回 None。"""
+    match = re.search(r"[（(]\s*(\d{1,2})\s*[)）]", label or "")
+    if match:
+        return int(match.group(1))
+    lead = re.match(r"^\s*(\d{1,2})", label or "")
+    return int(lead.group(1)) if lead else None
+
+
+def distribute_answers_into_subquestions(items: list) -> int:
+    """把篇章题（整篇一条）携带的**整组答案串**按 (k) 序号拆开，写进各小题。
+
+    适用于两级模型：一道篇章题 item 的 stem_md 是材料、sub_questions 是各小题，
+    而答案区归并到本题的 answer 常是「（1）B\n（2）C…」整组串。本函数只搬运本就写
+    在一起的字母/短句，不调模型、不猜内容。返回新填上答案的小题数。
+    """
+    filled = 0
+    for item in items:
+        if getattr(item, "excluded", False):
+            continue
+        subs = getattr(item, "sub_questions", None) or []
+        if len(subs) < 2:
+            continue
+        # 小题已有答案的不参与（模型内联给全了）。
+        need = [s for s in subs if not str(s.get("answer") or "").strip()]
+        if not need:
+            continue
+        blob = (getattr(item, "answer", "") or "").strip()
+        if not blob:
+            continue
+        indices = [_sub_index(str(s.get("label") or "")) for s in subs]
+        mapping = _split_blob(blob)
+        if not mapping:
+            mapping = _positional_letters(
+                blob, [i for i in indices if i is not None]
+            )
+        if not mapping:
+            continue
+        for sub, idx in zip(subs, indices):
+            if idx is None or str(sub.get("answer") or "").strip():
+                continue
+            value = mapping.get(idx)
+            if value:
+                sub["answer"] = value
+                filled += 1
+        # 拆完把整组串从顶层 answer 上清掉，避免与小题答案重复展示。
+        if any(str(s.get("answer") or "").strip() for s in subs):
+            item.answer = None
+    return filled

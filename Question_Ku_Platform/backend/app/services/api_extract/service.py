@@ -72,7 +72,10 @@ from .answers import (
     trailing_number,
 )
 from .boundary import BoundaryResult, build_line_inventory, detect_boundaries
-from .passage_answers import distribute_group_answers
+from .passage_answers import (
+    distribute_answers_into_subquestions,
+    distribute_group_answers,
+)
 from .prompts import is_english_subject
 from .structure import structure_questions
 
@@ -236,6 +239,7 @@ def _assemble_items(
                 score=score,
                 stem_md=stem_md,
                 options=parsed.options if parsed else [],
+                sub_questions=parsed.sub_questions if parsed else [],
                 content=content,
                 raw_text=raw_text,
                 answer=answer.answer if answer else None,
@@ -696,6 +700,13 @@ async def run_extract(
             if distributed:
                 warnings.append(
                     f"英语篇章题：按小题序号拆分回填了 {distributed} 道小题的答案。"
+                )
+            # 两级模型：篇章题是整篇一条，答案区归并到本题的常是「（1）B…（10）C」
+            # 整组串，按小题序号拆进各自的 sub_questions.answer。
+            distributed_sub = distribute_answers_into_subquestions(items)
+            if distributed_sub:
+                warnings.append(
+                    f"英语篇章题：把整组答案拆回 {distributed_sub} 道小题。"
                 )
         answer_report = _build_answer_report(items, answer_warnings)
         # 没有答案源就不做答案匹配断言：answer_total 恒等于题数，纯题目卷

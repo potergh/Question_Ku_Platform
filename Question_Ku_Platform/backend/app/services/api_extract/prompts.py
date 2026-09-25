@@ -92,9 +92,9 @@ def is_english_subject(subject: str | None) -> bool:
 
 
 BOUNDARY_ENGLISH_APPENDIX = """英语篇章题补充规则（仅英语试卷适用，优先级高于上文通用规则）：
-E1. 篇章题拆分：阅读理解、完形填空、任务型阅读、听力长对话等「一篇材料（文章/对话）带多个各自带编号的小题」的结构，**每个小题各输出一条 question**，type 用 cloze / reading / task_reading / listening 等；label 用该小题在原文里的编号。承载材料正文的行归入**该组第一个小题**的区间（其 start_line 从材料首行起），其余小题从各自题干行起，各带自己的选项与编号。绝不允许把「整篇材料 + 若干小题」合并成一条，也不许只输出第一个小题。
+E1. 篇章题整题成组：完形填空、阅读理解、任务型阅读、综合填空等「一篇材料（文章/对话）带多个各自带编号的小题」的结构，**把整篇材料连同它的全部小题作为同一条 question 输出**：start_line 从材料（或该组第一个小题题干）首行起，end_line 到该组最后一个小题（含其选项）末行止；label 用该组在原文中出现的第一个编号；type 用 cloze / reading / task_reading / use_of_english。**绝不要把同一篇材料的小题拆成多条 question**，也不要丢掉材料正文或只输出第一个小题。同一板块里若有 A/B/C 多篇独立材料，则每篇各成一条。
 E2. type 追加取值：在通用枚举之外，英语题允许 listening / grammar_choice / cloze / reading / task_reading / use_of_english / sentence_completion / writing。
-E3. 完整性强化：每个大题板块（一、二、三……直到最后一个，含「补全对话 / 情景交际」等中间板块，绝不能整段凭空消失）都必须有题目输出；听力与选择小题的选项必须抄全（通常 A/B/C/D 四项），不得只抄三项。"""
+E3. 完整性强化：每个大题板块（一、二、三……直到最后一个，含「补全对话 / 情景交际」等中间板块，绝不能整段凭空消失）都必须有题目输出；篇章题材料里的每个小题都要包含在这条 question 的区间里，小题选项（通常 A/B/C/D 四项）不得截断。"""
 
 
 def boundary_system_prompt(subject: str | None) -> str:
@@ -176,6 +176,15 @@ STRUCTURE_SYSTEM_TEMPLATE = """你是中文试题结构化专家。给你一道�
 8. 只输出 JSON。"""
 
 
+STRUCTURE_ENGLISH_APPENDIX = """英语篇章题结构化补充（仅英语试卷适用，优先级高于上文通用规则）：
+P1. 若本题是篇章题（完形填空 / 阅读理解 / 任务型阅读 / 综合填空：一篇材料带多个各自编号的小题），则：
+  - stem_md 只放**共享材料正文**（文章/对话原文，含空格与下划线），不含任何小题题干与选项；
+  - 额外输出字段 "sub_questions"：数组，每个小题一项，形如 {"label":"（1）","stem":"该小题题干","options":[{"label":"A","content":"…"}],"answer":"该小题答案，原文没有则 null"}；小题按原文编号升序，**全部小题都要有，缺一不可**；
+  - 每道小题的选项必须抄全（完形/阅读通常 A/B/C/D 四项）；顶层 options 对篇章题填 []（选项在各自小题里）。
+P2. 若只是普通单题（哪怕在英语卷里），保持上文规则：正常输出 options，"sub_questions" 填 []。
+P3. 严禁臆造材料中没有的内容；answer 只在原文该处明确写了才填。"""
+
+
 def structure_system_prompt(
     subject: str | None, *, tables_as_figures: bool = False
 ) -> str:
@@ -185,11 +194,17 @@ def structure_system_prompt(
     只有**每个**表格块都拿到了渲染图时才该置 True：否则那张表的 HTML 被禁止重抄、
     图又不存在，题目会整块丢掉内容 —— 宁可留一份残缺的 Markdown。调用方按
     build_figure_candidates 的 stats 判断（见 mineru_service）。
+
+    英语追加篇章题两级结构规则（``STRUCTURE_ENGLISH_APPENDIX``）；其余学科（含物理）
+    返回逐字不变的基线，避免英语改造扰动他科。
     """
-    return STRUCTURE_SYSTEM_TEMPLATE.format(
+    base = STRUCTURE_SYSTEM_TEMPLATE.format(
         formula_clause=formula_clause(subject),
         table_clause=TABLE_CLAUSE_FIGURE if tables_as_figures else TABLE_CLAUSE_MARKDOWN,
     )
+    if is_english_subject(subject):
+        return f"{base}\n\n{STRUCTURE_ENGLISH_APPENDIX}"
+    return base
 
 
 def structure_user_text(line_text: str, *, label: str, section: str | None, has_image: bool) -> str:

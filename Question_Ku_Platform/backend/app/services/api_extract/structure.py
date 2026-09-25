@@ -51,6 +51,9 @@ class StructuredItem:
     section: str | None = None
     stem_md: str = ""
     options: list[dict] = field(default_factory=list)
+    # 英语篇章题（完形/阅读等）的小题列表：{label,stem,options,answer}。
+    # stem_md 存共享材料；非篇章题为空列表。
+    sub_questions: list[dict] = field(default_factory=list)
     qtype: str | None = None
     score: float | None = None
     has_formula: bool = False
@@ -96,6 +99,36 @@ def _clean_options(rows) -> list[dict]:
                 cleaned.append({"label": match.group(1).upper(), "content": match.group(2).strip()})
             else:
                 cleaned.append({"label": "", "content": row.strip()})
+    return cleaned
+
+
+def _clean_sub_questions(rows) -> list[dict]:
+    """把模型返回的篇章题小题数组归一为 [{label,stem,options,answer}]。
+
+    非法项静默降级（与非篇章题返回空列表），绝不抛错。options 复用 _clean_options。
+    """
+    if not isinstance(rows, list):
+        return []
+    cleaned: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        label = str(row.get("label") or "").strip()
+        stem = str(row.get("stem") or row.get("stem_md") or "").strip()
+        answer = row.get("answer")
+        answer = str(answer).strip() if answer and str(answer).strip().lower() not in ("null", "none") else ""
+        explanation = row.get("explanation")
+        explanation = str(explanation).strip() if explanation else ""
+        options = _clean_options(row.get("options"))
+        # 一道小题至少要有题干或选项才值得保留。
+        if not (label or stem or options):
+            continue
+        sub = {"label": label, "stem": stem, "options": options}
+        if answer:
+            sub["answer"] = answer
+        if explanation:
+            sub["explanation"] = explanation
+        cleaned.append(sub)
     return cleaned
 
 
@@ -196,6 +229,7 @@ def _parse_payload(payload, item: StructuredItem) -> None:
     stem = payload.get("stem_md")
     item.stem_md = str(stem).strip() if stem else ""
     item.options = _clean_options(payload.get("options"))
+    item.sub_questions = _clean_sub_questions(payload.get("sub_questions"))
     qtype = payload.get("type")
     item.qtype = str(qtype).strip() or None if qtype else None
     try:
