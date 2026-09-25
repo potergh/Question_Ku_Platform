@@ -164,10 +164,21 @@
           -->
           <div v-show="detailMode === 'preview'" class="col-preview">
             <div class="rich" v-html="renderFullContent(edit.stem_md)"></div>
-            <template v-if="!isPassageType(edit.question_type)">
+            <!-- 篇章题：材料在上，下列各小题（各自选项与答案）成组展示。 -->
+            <div v-if="hasSubQuestions" class="passage-subs">
+              <div v-for="(sub, si) in edit.sub_questions" :key="si" class="passage-sub">
+                <div class="rich rich-sub">
+                  <span class="sub-label">{{ sub.label || `（${si + 1}）` }}</span>
+                  <span v-html="renderFullContent(sub.stem)"></span>
+                </div>
+                <div v-for="(opt, oi) in (sub.options || [])" :key="oi" class="rich-opt" v-html="optionHtml(opt)"></div>
+                <div v-if="sub.answer" class="rich-opt">答案：<span v-html="renderFullContent(sub.answer)"></span></div>
+              </div>
+            </div>
+            <template v-else-if="!isPassageType(edit.question_type)">
               <div v-for="(opt, i) in edit.options" :key="i" class="rich-opt" v-html="optionHtml(opt)"></div>
             </template>
-            <div v-else class="rich-opt muted">（{{ typeText(edit.question_type) }}：一篇材料挂多个小题，小题选项待结构化，暂不展示，答案见下）</div>
+            <div v-else class="rich-opt muted">（{{ typeText(edit.question_type) }}：一篇材料挂多个小题，小题未结构化，请对照原卷在编辑态人工补录）</div>
             <div v-if="edit.answer" class="rich-opt">
               答案：<span v-html="renderFullContent(edit.answer)"></span>
             </div>
@@ -212,10 +223,31 @@
                 <el-input v-model="edit.section" size="small" placeholder="所属板块（可空）" style="width: 170px" />
               </div>
 
-              <div class="field-label">题干（Markdown / LaTeX）</div>
+              <div class="field-label">{{ hasSubQuestions ? '材料正文（篇章题共享）' : '题干（Markdown / LaTeX）' }}</div>
               <el-input v-model="edit.stem_md" type="textarea" :rows="7" />
 
-              <template v-if="!isPassageType(edit.question_type)">
+              <!-- 篇章题：逐小题可编辑（题干/选项/答案）。 -->
+              <div v-if="hasSubQuestions" class="passage-edit">
+                <div class="field-label">小题（共 {{ edit.sub_questions.length }} 道）</div>
+                <div v-for="(sub, si) in edit.sub_questions" :key="si" class="sub-card">
+                  <div class="sub-head">
+                    <el-input v-model="sub.label" size="small" placeholder="小题号" style="width: 84px" />
+                    <el-button text type="danger" size="small" @click="edit.sub_questions.splice(si, 1)">删除小题</el-button>
+                  </div>
+                  <el-input v-model="sub.stem" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" placeholder="小题题干" />
+                  <div v-for="(opt, oi) in (sub.options || [])" :key="oi" class="opt-row">
+                    <el-input v-model="opt.label" size="small" style="width: 58px" />
+                    <el-input v-model="opt.content" size="small" type="textarea" :autosize="{ minRows: 1, maxRows: 3 }" />
+                    <el-button text type="danger" size="small" @click="sub.options.splice(oi, 1)">
+                      <el-icon><Close /></el-icon>
+                    </el-button>
+                  </div>
+                  <el-button text size="small" @click="addSubOption(sub)">+ 选项</el-button>
+                  <el-input v-model="sub.answer" size="small" placeholder="答案" style="margin-top: 6px" />
+                </div>
+                <el-button text size="small" type="primary" @click="addSubQuestion">+ 添加小题</el-button>
+              </div>
+              <template v-else-if="!isPassageType(edit.question_type)">
                 <div class="field-label">选项</div>
                 <div v-for="(opt, i) in edit.options" :key="i" class="opt-row">
                   <el-input v-model="opt.label" size="small" style="width: 58px" />
@@ -226,7 +258,7 @@
                 </div>
                 <el-button text size="small" type="primary" @click="addOption">+ 添加选项</el-button>
               </template>
-              <div v-else class="field-label muted">选项（{{ typeText(edit.question_type) }}为篇章题，小题选项待结构化，暂不展示）</div>
+              <div v-else class="field-label muted">选项（{{ typeText(edit.question_type) }}为篇章题且小题未结构化，可直接编辑上方材料/答案，或人工补录小题）</div>
 
               <div class="field-label">答案（来源：{{ originText(active.answer_origin) }}）</div>
               <el-input v-model="edit.answer" type="textarea" :rows="3" />
@@ -359,6 +391,7 @@ const edit = reactive({
   score: null,
   stem_md: '',
   options: [],
+  sub_questions: [],
   answer: null,
   explanation: null,
   needs_review: true,
@@ -370,6 +403,25 @@ const items = computed(() => doc.value?.items || [])
 const keptItems = computed(() => items.value.filter((item) => !item.excluded))
 const excludedItems = computed(() => items.value.filter((item) => item.excluded))
 const active = computed(() => items.value.find((item) => item.qid === activeQid.value) || null)
+
+// 篇章题小题的统一形态：补齐缺省键，syncEdit / dirty / 保存都用它。
+const normSubs = (list) =>
+  (list || []).map((s) => ({
+    label: s.label || '',
+    stem: s.stem || '',
+    options: (s.options || []).map((o) => ({ label: o.label || '', content: o.content || '' })),
+    answer: s.answer || '',
+    explanation: s.explanation || '',
+  }))
+// 有小题列表就按「材料 + 小题」两级渲染；否则走原单题路径。
+const hasSubQuestions = computed(() => (edit.sub_questions || []).length > 0)
+const addSubQuestion = () =>
+  edit.sub_questions.push({ label: '', stem: '', options: [], answer: '', explanation: '' })
+const addSubOption = (sub) => {
+  if (!Array.isArray(sub.options)) sub.options = []
+  const next = String.fromCharCode(65 + sub.options.length)
+  sub.options.push({ label: next, content: '' })
+}
 const reviewCount = computed(() => keptItems.value.filter((item) => item.needs_review).length)
 // 「只看待复核」过滤器已删（批量入库取代）：列表恒显全部未剔除的题，
 // 待复核状态看卡片上的黄标。当前选中的题若被剔除，右侧详情仍保留。
@@ -498,6 +550,8 @@ const dirty = computed(() => {
   const sameOptions =
     JSON.stringify(edit.options) ===
     JSON.stringify((item.options || []).map((o) => ({ label: o.label || '', content: o.content || '' })))
+  const sameSubs =
+    JSON.stringify(edit.sub_questions) === JSON.stringify(normSubs(item.sub_questions))
   return (
     (edit.label || '') !== (item.label || '') ||
     (edit.section ?? null) !== (item.section ?? null) ||
@@ -505,6 +559,7 @@ const dirty = computed(() => {
     (edit.score ?? null) !== (item.score ?? null) ||
     (edit.stem_md || '') !== (item.stem_md || '') ||
     !sameOptions ||
+    !sameSubs ||
     (edit.answer ?? null) !== (item.answer ?? null) ||
     (edit.explanation ?? null) !== (item.explanation ?? null) ||
     !!edit.needs_review !== !!item.needs_review
@@ -520,6 +575,7 @@ function syncEdit() {
   edit.score = item.score ?? null
   edit.stem_md = item.stem_md || ''
   edit.options = (item.options || []).map((o) => ({ label: o.label || '', content: o.content || '' }))
+  edit.sub_questions = normSubs(item.sub_questions)
   edit.answer = item.answer ?? null
   edit.explanation = item.explanation ?? null
   edit.needs_review = !!item.needs_review
@@ -594,6 +650,7 @@ async function save() {
       score: edit.score,
       stem_md: edit.stem_md,
       options: edit.options,
+      sub_questions: edit.sub_questions,
       answer: edit.answer,
       explanation: edit.explanation,
       needs_review: edit.needs_review,
@@ -1150,6 +1207,36 @@ onMounted(load)
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 4px;
+}
+
+/* 篇章题（材料 + 小题）预览/编辑样式 */
+.passage-subs {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rich-sub {
+  margin-top: 4px;
+}
+.sub-label {
+  font-weight: 600;
+  margin-right: 6px;
+}
+.passage-edit .sub-card {
+  border: 1px solid var(--el-border-color-light, #ebeef5);
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sub-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .field-label {

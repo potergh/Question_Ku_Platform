@@ -242,6 +242,35 @@
         <!-- Raw editor -->
         <el-input v-else v-model="detailQuestion.content" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" />
 
+        <!-- 篇章题（材料 + 小题）：小题成组展示/编辑，顶层选项区自动隐藏。 -->
+        <div v-if="detailQuestion.sub_questions?.length" style="margin-top: 12px;">
+          <h4>小题（{{ detailQuestion.sub_questions.length }} 道）</h4>
+          <template v-if="detailPreviewMode">
+            <div v-for="(sub, si) in detailQuestion.sub_questions" :key="si" style="margin-bottom: 10px;">
+              <div class="rendered-preview"><b>{{ sub.label || `（${si + 1}）` }}</b> <span v-html="renderFullContent(sub.stem)"></span></div>
+              <div v-for="(opt, oi) in (sub.options || [])" :key="oi" class="option-rendered" v-html="opt.label + '. ' + renderOptionContent(opt.content)"></div>
+              <div v-if="sub.answer" style="color: #67c23a;">答案：{{ sub.answer }}</div>
+            </div>
+          </template>
+          <template v-else>
+            <div v-for="(sub, si) in detailQuestion.sub_questions" :key="si" style="border: 1px solid #eee; border-radius: 6px; padding: 8px; margin-bottom: 8px;">
+              <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+                <el-input v-model="sub.label" size="small" style="width: 90px;" placeholder="小题号" />
+                <el-input v-model="sub.answer" size="small" style="flex: 1;" placeholder="答案" />
+                <el-button type="danger" size="small" :icon="Delete" circle @click="detailQuestion.sub_questions.splice(si, 1)" />
+              </div>
+              <el-input v-model="sub.stem" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" placeholder="小题题干" />
+              <div v-for="(opt, oi) in (sub.options || [])" :key="oi" style="display: flex; gap: 6px; margin-top: 6px; align-items: center;">
+                <el-input v-model="opt.label" size="small" style="width: 60px;" />
+                <el-input v-model="opt.content" size="small" style="flex: 1;" />
+                <el-button type="danger" size="small" :icon="Delete" circle @click="sub.options.splice(oi, 1)" />
+              </div>
+              <el-button size="small" style="margin-top: 6px;" @click="(sub.options || (sub.options = [])).push({ label: '', content: '' })">+ 选项</el-button>
+            </div>
+            <el-button type="primary" size="small" @click="detailQuestion.sub_questions.push({ label: '', stem: '', options: [], answer: '' })">+ 添加小题</el-button>
+          </template>
+        </div>
+
         <div v-if="detailQuestion.options?.length && !isPassageType(detailQuestion.question_type)" style="margin-top: 12px;">
           <h4 style="display: flex; align-items: center; gap: 8px;">
             选项
@@ -810,6 +839,7 @@ const saveDetail = async () => {
     await axios.put(`/api/questions/${q.id}`, {
       content: q.content,
       options: q.options,
+      sub_questions: q.sub_questions,
       answer: q.answer,
       explanation: q.explanation,
       difficulty: q.difficulty,
