@@ -72,6 +72,8 @@ from .answers import (
     trailing_number,
 )
 from .boundary import BoundaryResult, build_line_inventory, detect_boundaries
+from .passage_answers import distribute_group_answers
+from .prompts import is_english_subject
 from .structure import structure_questions
 
 logger = logging.getLogger(__name__)
@@ -687,6 +689,14 @@ async def run_extract(
             figure_extractor.last_size_dropped,
             low_overlap_map,
         )
+        # 英语篇章题：把挤在一条里的整组答案按小题序号 (k) 拆分回填到各小题。
+        # 仅英语生效，物理/数学/化学的答案归一行为逐字不变。
+        if is_english_subject(subject):
+            distributed = distribute_group_answers(items)
+            if distributed:
+                warnings.append(
+                    f"英语篇章题：按小题序号拆分回填了 {distributed} 道小题的答案。"
+                )
         answer_report = _build_answer_report(items, answer_warnings)
         # 没有答案源就不做答案匹配断言：answer_total 恒等于题数，纯题目卷
         # （本就不带答案）会被 100% 阻断、永远无法入库。缺失答案靠这条

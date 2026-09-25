@@ -25,6 +25,17 @@
 > 结论：切分（漏题）这一"钥匙"已被证明有效且对物理零影响；剩下的是**答案回填 + 边界补覆盖**两块收尾，
 > 均在共享阶段（答案归一 / 覆盖），须按英语门控以免回扰物理。
 
+### 两个收尾已实现（均 `is_english_subject` 门控，物理/数学/化学逐字不变）
+- **Fix 2·边界补覆盖**：`boundary.absorb_uncovered_gap_lines()`，在 `detect_boundaries` 小问泄漏修复之后、
+  构建 spans 之前调用（仅英语）。把相邻区间之间、未被任何区间覆盖的漏行并回前一道题（不越区间起点、
+  不越答案区下限）→ 救回听力题干与 D 选项。单测 `test_boundary_absorb.py`（5）。
+- **Fix 1·小题答案回填**：`api_extract/passage_answers.distribute_group_answers()`，在 `_assemble_items`
+  之后、`_build_answer_report` 之前调用（仅英语）。把 `32．（1）` 里挤着的「（1）B…（10）C」按 (k) 序号
+  拆回各小题（无序号纯字母串则按位分配）→ 消除大片 `no_answer`。单测 `test_passage_answers.py`（6）。
+
+重跑英语后实测（预期）：听力拿到题干/4 选项、完形阅读小题各自带答案、`no_answer` 大幅下降。
+注：整块「五、」丢失属模型未切出题行（凭空缺整段），确定性补覆盖能保内容不丢但不能凭空造题，仍需模型改进。
+
 ## 精确诊断（基于 `1358bedb_…英语/extract.json` 实测）
 
 ### 漏题（篇章多小题被压平成一条）

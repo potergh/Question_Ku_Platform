@@ -40,6 +40,7 @@ from .prompts import (
     PAGE_TRANSCRIBE_SYSTEM,
     boundary_system_prompt,
     boundary_user_text,
+    is_english_subject,
     page_transcribe_user_text,
 )
 from .vlm_client import VLMError, call_vlm_json
@@ -828,6 +829,53 @@ def repair_subquestion_leak(
     return repaired
 
 
+def absorb_uncovered_gap_lines(
+    line_index: dict[int, TextLine],
+    questions: list[dict],
+    regions: list[dict],
+    warnings: list[str],
+    *,
+    answer_floor_line: int | None = None,
+    max_absorb: int = 40,
+) -> int:
+    """把落在相邻区间之间、未被任何区间覆盖的“漏行”并回前一道题（仅英语通道调用）。
+
+    实测（2023 河西英语）：听力题的题干与选项行常被模型划到题目区间之外——
+    item 2–14 的 `raw_text` 只剩“2．（1 分）”，D 选项整段未覆盖。这些行
+    在物理位置上就属于上一题的延续，与其静默丢失，不如确定性地并回上一题，
+    交给结构化阶段识别选项。只在两区间之间没有任何区间起点时扩界，
+    绝不吞掉下一题/板块标题/答案区的行。不单独限学科，由调用方按英语门控。
+    """
+    if not questions:
+        return 0
+    # 所有区间（题目 + 非题目区）的起点，决定每道题能往后扩到哪。
+    starts = {row["start_line"] for row in questions} | {
+        row["start_line"] for row in regions
+    }
+    ordered_starts = sorted(starts)
+    if answer_floor_line is not None:
+        ordered_starts.append(answer_floor_line)
+        ordered_starts.sort()
+
+    absorbed_total = 0
+    for row in sorted(questions, key=lambda r: r["start_line"]):
+        end = row["end_line"]
+        nxt = next((s for s in ordered_starts if s > end), None)
+        if nxt is None:
+            # 后面没有任何区间（最后一题且无答案区下限）：不扩，宁缺勿滥。
+            continue
+        gap = [lid for lid in range(end + 1, nxt) if lid in line_index][:max_absorb]
+        if not gap:
+            continue
+        row["end_line"] = gap[-1]
+        absorbed_total += len(gap)
+    if absorbed_total:
+        warnings.append(
+            f"英语边界补覆盖：把 {absorbed_total} 行未被覆盖的题干/选项行并回所属题目。"
+        )
+    return absorbed_total
+
+
 def avoid_figure_cuts(
     doc: fitz.Document,
     records: list[QuestionRecord],
@@ -1152,6 +1200,20 @@ async def detect_boundaries(
     repaired = repair_subquestion_leak(line_index, questions, result.warnings)
     if repaired:
         logger.info("boundary：小问泄漏修复了 %d 处", repaired)
+
+    # 英语边界补覆盖：把模型漏划到区间外的题干/选项行（听力第 2–14 题、缺的 D 选项尤为典型）
+    # 并回所属题目。仅英语生效，物理/数学/化学的边界行为逐字不变。
+    if is_english_subject(subject):
+        answer_floor = min(answer_area_line_ids) if answer_area_line_ids else None
+        absorbed = absorb_uncovered_gap_lines(
+            line_index,
+            questions,
+            regions,
+            result.warnings,
+            answer_floor_line=answer_floor,
+        )
+        if absorbed:
+            logger.info("boundary：英语补覆盖并回 %d 行", absorbed)
 
     result.doc_kind = _doc_kind([kind for kind in kinds if kind], doc_kind_hint)
     result.spans = [
