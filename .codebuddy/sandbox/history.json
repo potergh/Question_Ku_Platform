@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "records": [
+    {
+      "spaceKey": "29d69fecf1b04d6293f8ca8be1ce5704",
+      "projectPath": "d:\\tiku_9.10\\Question_Ku_Platform\\_deploy_clean",
+      "desc": "智能题库讲义制作平台（干净部署：不含任何用户数据与 API Key，访客需在设置页自行填写自己的 Key）",
+      "createdAt": 1790257387807
+    },
+    {
+      "spaceKey": "35ca9aeb62db4c8dbd61455b6d711763",
+      "projectPath": "d:\\tiku_9.10\\Question_Ku_Platform\\_deploy_clean",
+      "desc": "智能题库讲义制作平台（含 PDF 预览渲染依赖：Chromium + KaTeX；MinerU 通道已补水印清洗）",
+      "createdAt": 1790269965277
+    },
+    {
+      "spaceKey": "2799f473f8174c4986851583e588b929",
+      "projectPath": "d:\\tiku_9.10\\Question_Ku_Platform\\_deploy_clean",
+      "desc": "智能题库讲义制作平台（含 PDF 预览渲染依赖：Chromium + KaTeX；MinerU 通道已补水印清洗）",
+      "createdAt": 1790270042433
+    },
+    {
+      "spaceKey": "a4c1eff3ba2a4ff288580423be066f54",
+      "projectPath": "d:\\tiku_9.10\\Question_Ku_Platform\\_deploy_clean",
+      "desc": "智能题库讲义制作平台（MinerU 水印清洗 + 预览渲染错误可见化）",
+      "createdAt": 1790270116725
+    },
+    {
+      "spaceKey": "df79f3b5b1bd4181aebf4a03eeaed9cb",
+      "projectPath": "d:\\tiku_9.10\\Question_Ku_Platform\\_deploy_clean",
+      "desc": "智能题库讲义制作平台（MinerU 水印清洗 + 预览渲染错误可见化）",
+      "createdAt": 1790270220216
+    }
+  ]
+}
