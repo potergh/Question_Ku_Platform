@@ -1,0 +1,678 @@
+import os
+import json
+import pytest
+from unittest.mock import MagicMock, patch
+
+from main import LOCAL_TOKEN
+from mathbank.database import Paper, PaperQuestion, Question
+
+def test_paper_api_flow(client):
+    headers = {"X-Local-Token": LOCAL_TOKEN}
+    
+    # 1. Create a question
+    q_data = {
+        "content": "已知函数 $f(x) = x^2 + 2x + 1$，求 $f(1)$ 的值。\n\\begin{choices}\n\\item 1\n\\item 2\n\\item 4\n\\item 8\n\\end{choices}",
+        "question_type": "single_choice",
+        "category_compulsory": "必修第一册",
+        "category_chapter": "第一章 集合与常用逻辑用语",
+        "category_knowledge": "集合的概念",
+        "difficulty": "easy",
+        "source": "2026月考",
+        "answer_markdown": "解：$f(1) = 1^2 + 2(1) + 1 = 4$。故选 C。",
+        "review": "易错点：计算细节",
+        "tags": "函数,计算",
+        "related_question_id": "",
+        "image_paths": "[]"
+    }
+    create_res = client.post("/api/questions", data=q_data, headers=headers)
+    assert create_res.status_code == 200
+    q_id = create_res.json()["question"]["id"]
+    
+    # 2. Batch fetch paper questions
+    fetch_res = client.get(f"/api/paper/questions?ids={q_id}")
+    assert fetch_res.status_code == 200
+    assert len(fetch_res.json()["data"]) == 1
+    assert fetch_res.json()["data"][0]["id"] == q_id
+    assert fetch_res.json()["data"][0]["seq_num"] == 1
+    
+    # 3. Save Paper & verify usage_count increment
+    paper_payload = {
+        "title": "测试高中数学单元测试卷",
+        "subtitle": "满分150分",
+        "paper_type": "exam",
+        "questions": [{"id": q_id, "score": 5, "order": 1}]
+    }
+    save_res = client.post("/api/paper/save", json=paper_payload, headers=headers)
+    print("SAVE_RES:", save_res.json())
+    assert save_res.status_code == 200
+    assert save_res.json()["status"] == "success"
+    
+    # Check question usage count
+    get_q_res = client.get(f"/api/questions/{q_id}")
+    assert get_q_res.status_code == 200
+    assert get_q_res.json()["usage_count"] == 1
+
+    # 4. Export LaTeX TEX Zip
+    tex_res = client.post("/api/paper/export/tex", json=paper_payload, headers=headers)
+    assert tex_res.status_code == 200
+    assert tex_res.headers.get("content-type") == "application/zip"
+
+    # 4b. Export Full Bundle Zip (TeX + PDF)
+    bundle_res = client.post("/api/paper/export/bundle", json=paper_payload, headers=headers)
+    assert bundle_res.status_code == 200
+    assert bundle_res.headers.get("content-type") == "application/zip"
+
+    # 5. AI Paper Selection
+    ai_res = client.post("/api/paper/ai-select", json={"prompt": "函数", "limit": 5}, headers=headers)
+    assert ai_res.status_code == 200
+    assert ai_res.json()["status"] == "success"
+    assert len(ai_res.json()["data"]) >= 1
+
+    # 6. Saved Papers List & Detail & Delete
+    list_res = client.get("/api/papers")
+    assert list_res.status_code == 200
+    papers_list = list_res.json()["data"]
+    assert len(papers_list) >= 1
+    paper_id = papers_list[0]["id"]
+
+    detail_res = client.get(f"/api/papers/{paper_id}")
+    assert detail_res.status_code == 200
+    assert detail_res.json()["data"]["title"] == "测试高中数学单元测试卷"
+    assert len(detail_res.json()["data"]["questions"]) == 1
+
+    del_res = client.delete(f"/api/papers/{paper_id}", headers=headers)
+    assert del_res.status_code == 200
+    assert del_res.json()["status"] == "success"
+
+
+def test_ai_paper_selection_uses_shared_provider_and_clean_effort(
+    client, db_session
+):
+    question = Question(
+        content="求函数的导数",
+        question_type="detailed_answer",
+        difficulty="medium",
+    )
+    excluded_question = Question(
+        content="不应越过类型筛选的选择题",
+        question_type="single_choice",
+        difficulty="medium",
+    )
+    db_session.add_all([question, excluded_question])
+    db_session.commit()
+    response = MagicMock(status_code=200)
+    response.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps(
+                        {
+                            "selected_ids": [
+                                excluded_question.id,
+                                question.id,
+                                question.id,
+                            ],
+                            "ai_analysis": "选取一道导数题",
+                        },
+                        ensure_ascii=False,
+                    )
+                }
+            }
+        ]
+    }
+    provider_env = {
+        "PREFER_SOLVE_MODEL": "ZHONGZHAN_GPT/gpt-5.6-sol:high",
+        "ZHONGZHAN_GPT_API_KEY": "transit-key",
+        "ZHONGZHAN_GPT_BASE_URL": (
+            "https://transit.example/v1/chat/completions/"
+        ),
+    }
+
+    with patch.dict(os.environ, provider_env, clear=False), patch(
+        "mathbank.ai_http.robust_request_post", return_value=response
+    ) as mock_post:
+        result = client.post(
+            "/api/paper/ai-select",
+            json={
+                "prompt": "请选 1 道函数题",
+                "question_type": "detailed_answer",
+                "limit": 1,
+            },
+            headers={"X-Local-Token": LOCAL_TOKEN},
+        )
+
+    assert result.status_code == 200
+    assert result.json()["fallback"] is False
+    assert [item["id"] for item in result.json()["data"]] == [question.id]
+    args, kwargs = mock_post.call_args
+    assert args[0] == "https://transit.example/v1/chat/completions"
+    assert kwargs["json"]["model"] == "gpt-5.6-sol"
+    assert kwargs["json"]["reasoning_effort"] == "high"
+    assert "enable_thinking" not in kwargs["json"]
+
+
+@pytest.mark.parametrize(
+    "questions",
+    [
+        [{"id": 999999, "score": 5}],
+        [{"id": 1, "score": 5}, {"id": 1, "score": 5}],
+        [{"id": 1, "score": -1}],
+    ],
+)
+def test_invalid_paper_items_are_rejected_without_partial_rows(
+    client, db_session, questions
+):
+    question = Question(content="组卷事务题", question_type="single_choice")
+    db_session.add(question)
+    db_session.commit()
+    # Parameter values use the first SQLite ID in this isolated fixture.
+    for item in questions:
+        if item["id"] == 1:
+            item["id"] = question.id
+
+    result = client.post(
+        "/api/paper/save",
+        json={"title": "无效试卷", "paper_type": "exam", "questions": questions},
+        headers={"X-Local-Token": LOCAL_TOKEN},
+    )
+
+    assert result.status_code == 400
+    assert db_session.query(Paper).count() == 0
+    assert db_session.query(PaperQuestion).count() == 0
+    db_session.refresh(question)
+    assert question.usage_count in {None, 0}
+
+def test_exam_19_and_answer_sheet_generation(client, db_session):
+    headers = {"X-Local-Token": LOCAL_TOKEN}
+    
+    from mathbank.paper_helper import build_answer_sheet_latex
+    
+    questions_data = [
+        {
+            "question": {
+                "id": 101,
+                "question_type": "detailed_answer",
+                "content": "求证：$\\sin^2 x + \\cos^2 x = 1$。\n\\begin{tikzpicture}\n\\draw (0,0) -- (1,1);\n\\end{tikzpicture}"
+            },
+            "score": 13
+        }
+    ]
+    
+    sheet_tex = build_answer_sheet_latex("2026年模拟考试试卷", "", questions_data)
+    assert "\\documentclass" in sheet_tex
+    assert "2026年模拟考试试卷" in sheet_tex
+    assert "15.（13分）" in sheet_tex
+    assert "\\begin{tikzpicture}" in sheet_tex
+
+    # Test export endpoints for exam_19
+    question = Question(
+        content="求证：$\\sin^2 x + \\cos^2 x = 1$。",
+        question_type="detailed_answer",
+    )
+    db_session.add(question)
+    db_session.commit()
+    paper_payload = {
+        "title": "2026年高考模拟试卷",
+        "subtitle": "数学",
+        "paper_type": "exam_19",
+        "questions": [{"id": question.id, "score": 13}],
+    }
+    
+    export_res = client.post("/api/paper/export/tex", json=paper_payload, headers=headers)
+    assert export_res.status_code == 200
+    assert export_res.headers.get("content-type") == "application/zip"
+
+    pdf_sheet_payload = {
+        "title": "2026年高考模拟试卷",
+        "subtitle": "数学",
+        "paper_type": "exam_19",
+        "target": "sheet",
+        "questions": [{"id": question.id, "score": 13}],
+    }
+    # The endpoint contract should not depend on XeLaTeX being installed on
+    # the CI runner; compilation behavior has separate focused tests.
+    with patch(
+        "main.compile_tex_to_pdf",
+        return_value=(b"%PDF-1.7\n% deterministic test payload", ""),
+    ):
+        sheet_pdf_res = client.post(
+            "/api/paper/export/pdf", json=pdf_sheet_payload, headers=headers
+        )
+    assert sheet_pdf_res.status_code == 200
+    assert sheet_pdf_res.headers.get("content-type") == "application/pdf"
+
+def test_solution_space_latex_generation():
+    from mathbank.paper_helper import build_latex_document
+    questions_data_65 = [{
+        "question": {
+            "id": 99,
+            "question_type": "detailed_answer",
+            "content": "已知函数 $f(x) = ax^2 + bx + c$，求导数 $f'(x)$。",
+            "figure_align": "right"
+        },
+        "score": 12,
+        "solution_space": "6.5"
+    }]
+    questions_data_zero = [{
+        "question": {
+            "id": 99,
+            "question_type": "detailed_answer",
+            "content": "已知函数 $f(x) = ax^2 + bx + c$，求导数 $f'(x)$。",
+            "figure_align": "right"
+        },
+        "score": 12,
+        "solution_space": "0.0"
+    }]
+    
+    # 1. Non-exam_19 paper mode -> should inject \vspace*{6.5cm}
+    tex = build_latex_document("单元测试", "试卷", "exam", questions_data_65, include_answers=False)
+    assert r"\vspace*{6.5cm}" in tex
+    
+    # 2. exam_19 paper mode with 3.0cm solution space -> should inject \vspace*{3.0cm}
+    questions_data_3 = [{
+        "question": {
+            "id": 99,
+            "question_type": "detailed_answer",
+            "content": "已知函数 $f(x) = ax^2 + bx + c$，求导数 $f'(x)$。",
+            "figure_align": "right"
+        },
+        "score": 12,
+        "solution_space": "3.0"
+    }]
+    tex_19_three = build_latex_document("高考模拟", "试卷", "exam_19", questions_data_3, include_answers=False)
+    assert r"\vspace*{3.0cm}" in tex_19_three
+
+    # 3. exam_19 paper mode with 0.0cm solution space -> should not inject \vspace
+    tex_19_zero = build_latex_document("高考模拟", "试卷", "exam_19", questions_data_zero, include_answers=False)
+    assert r"\vspace*" not in tex_19_zero
+
+
+def test_latex_export_renders_every_editable_content_tikz_asset_once():
+    from mathbank.paper_helper import build_latex_document
+
+    first_code = r"\begin{tikzpicture}\draw (0,0)--(1,0);\end{tikzpicture}"
+    second_code = r"\begin{tikzpicture}\draw (0,0) circle (1);\end{tikzpicture}"
+    questions = [{
+        "question": {
+            "id": 100,
+            "question_type": "detailed_answer",
+            "content": (
+                "多图测试\n\n![第一图](/static/uploads/tikz_first.png)"
+                "\n\n![第二图](/static/uploads/tikz_second.png)"
+                "\n\n![普通图](/static/uploads/photo.png)"
+            ),
+            "content_tikz_assets": [
+                {
+                    "id": "content_first",
+                    "image_path": "/static/uploads/tikz_first.png",
+                    "tikz_code": first_code,
+                },
+                {
+                    "id": "content_second",
+                    "image_path": "/static/uploads/tikz_second.png",
+                    "tikz_code": second_code,
+                },
+            ],
+            "tikz_code": first_code,
+            "figure_align": "center",
+        },
+        "score": 12,
+    }]
+
+    tex = build_latex_document("多图测试", "", "exam", questions)
+
+    assert tex.count(first_code) == 1
+    assert tex.count(second_code) == 1
+    assert "tikz_first.png" not in tex
+    assert "tikz_second.png" not in tex
+    assert tex.count(r"\resizebox{4.5cm}{!}{") == 2
+    assert (
+        r"\includegraphics[max width=3.8cm,max height=6.0cm,keepaspectratio]{photo.png}"
+        in tex
+    )
+
+
+def test_latex_export_preserves_complex_inline_and_tabular_image_positions():
+    from mathbank.paper_helper import build_latex_document
+
+    content = (
+        "【课本回顾】如图 1，在三角形中研究中线。\n\n"
+        "![图1和图2](/static/uploads/fig12.png)\n\n"
+        "【知识探究】比较下面两种思路。\n\n"
+        r"\begin{tabular}{|c|c|c|}" "\n"
+        r" & 思路一 & 思路二 \\" "\n"
+        r"\multirow{2}{*}{第一步} & 证明一 & 证明二 \\" "\n"
+        r" & 推导一 & 推导二 \\" "\n"
+        r"图形表达 & ![图3](/static/uploads/fig3.png) & "
+        r"![图4](/static/uploads/fig4.png) \\" "\n"
+        r"\end{tabular}"
+    )
+    questions = [{
+        "question": {
+            "id": 102,
+            "question_type": "detailed_answer",
+            "content": content,
+            "figure_align": "right",
+        },
+        "score": 12,
+        "solution_space": "0.0",
+    }]
+
+    tex = build_latex_document("复杂图文题", "", "exam", questions)
+
+    first = tex.index("fig12.png")
+    knowledge = tex.index("【知识探究】")
+    table_start = tex.index(r"\begin{tabularx}")
+    third = tex.index("fig3.png")
+    fourth = tex.index("fig4.png")
+    table_end = tex.index(r"\end{tabularx}")
+    assert first < knowledge < table_start < third < fourth < table_end
+    table_tex = tex[table_start:table_end]
+    assert r"\multirow{2}{*}{第一步}" in table_tex
+    assert table_tex.count(r"\adjustbox{valign=m,margin=0pt 3pt}{") == 2
+    assert r"\includegraphics[max width=\linewidth,max height=4.0cm,keepaspectratio]{fig3.png}" in table_tex
+    assert r"\includegraphics[max width=\linewidth,max height=4.0cm,keepaspectratio]{fig4.png}" in table_tex
+    assert r"\noindent\begin{tabularx}{\linewidth}" in tex
+    assert r">{\centering\arraybackslash}m{4em}" in tex
+    assert tex.count(r">{\centering\arraybackslash}X") == 2
+    assert r"\end{tabularx}" in tex
+
+
+def test_latex_export_keeps_single_trailing_figure_alignment_layout():
+    from mathbank.paper_helper import build_latex_document
+
+    questions = [{
+        "question": {
+            "id": 103,
+            "question_type": "detailed_answer",
+            "content": "普通右图题\n\n![](/static/uploads/graph.png)",
+            "figure_align": "right",
+        },
+        "score": 12,
+        "solution_space": "0.0",
+    }]
+
+    tex = build_latex_document("普通右图题", "", "exam", questions)
+
+    assert r"\begin{minipage}[t]{\dimexpr\linewidth-5.8cm\relax}" in tex
+    assert (
+        r"\includegraphics[max width=5.0cm,max height=6.0cm,keepaspectratio]{graph.png}"
+        in tex
+    )
+    assert r"\adjustbox{max width=\linewidth}{\includegraphics" in tex
+
+
+def test_quiz_legacy_right_default_respects_persisted_custom_alignment():
+    from mathbank.paper_helper import build_latex_document
+
+    base_question = {
+        "id": 104,
+        "question_type": "detailed_answer",
+        "content": "小练插图题\n\n![](/static/uploads/graph.png)",
+        "figure_align": "right",
+    }
+    legacy_tex = build_latex_document(
+        "旧题小练", "", "quiz", [{"question": base_question, "score": 5}]
+    )
+    persisted_custom_tex = build_latex_document(
+        "新题小练",
+        "",
+        "quiz",
+        [{
+            "question": {**base_question, "figure_align_custom": True},
+            "score": 5,
+        }],
+    )
+    transient_custom_tex = build_latex_document(
+        "临时布局小练",
+        "",
+        "quiz",
+        [{
+            "question": {**base_question, "custom_figure_align": "right"},
+            "score": 5,
+        }],
+    )
+
+    assert r"\begin{flushright}" in legacy_tex
+    assert r"\begin{minipage}[t]{\dimexpr\linewidth-5.8cm\relax}" not in legacy_tex
+    for tex in (persisted_custom_tex, transient_custom_tex):
+        assert r"\begin{minipage}[t]{\dimexpr\linewidth-5.8cm\relax}" in tex
+        assert r"\begin{flushright}" not in tex
+
+
+@pytest.mark.parametrize(
+    ("figure_align", "figure_size", "expected_width", "expected_height"),
+    [
+        ("bottom_left", "small", "5.0cm", "4.0cm"),
+        ("center", "small", "5.0cm", "4.0cm"),
+        ("center", "medium", "8.0cm", "6.0cm"),
+        ("bottom_right", "large", "11.0cm", "8.0cm"),
+        ("right", "large", "5.0cm", "8.0cm"),
+    ],
+)
+def test_latex_export_maps_explicit_figure_size_by_alignment(
+    figure_align,
+    figure_size,
+    expected_width,
+    expected_height,
+):
+    from mathbank.paper_helper import build_latex_document
+
+    questions = [{
+        "question": {
+            "id": 105,
+            "question_type": "detailed_answer",
+            "content": "带图题\n\n![](/static/uploads/graph.png)",
+            "figure_align": figure_align,
+            "figure_size": figure_size,
+        },
+        "score": 12,
+        "solution_space": "0.0",
+    }]
+
+    tex = build_latex_document("插图尺寸题", "", "exam", questions)
+
+    assert (
+        rf"\includegraphics[max width={expected_width},max height={expected_height},"
+        rf"keepaspectratio]{{graph.png}}"
+        in tex
+    )
+    assert r"\adjustbox{max width=\linewidth}{\includegraphics" in tex
+
+
+@pytest.mark.parametrize(
+    ("figure_align", "figure_size", "expected_width", "expected_height"),
+    [
+        ("bottom_left", "large", "11.0cm", "8.0cm"),
+        ("center", "medium", "8.0cm", "6.0cm"),
+        ("bottom_right", "large", "11.0cm", "8.0cm"),
+        ("right", "large", "5.0cm", "8.0cm"),
+    ],
+)
+def test_latex_export_maps_explicit_tikz_size_and_caps_right_layout(
+    figure_align,
+    figure_size,
+    expected_width,
+    expected_height,
+):
+    from mathbank.paper_helper import build_latex_document
+
+    tikz_code = r"\begin{tikzpicture}\draw (0,0)--(8,0);\end{tikzpicture}"
+    questions = [{
+        "question": {
+            "id": 106,
+            "question_type": "detailed_answer",
+            "content": "TikZ 尺寸题\n\n![](/static/uploads/tikz_graph.png)",
+            "content_tikz_assets": [{
+                "id": "content_graph",
+                "image_path": "/static/uploads/tikz_graph.png",
+                "tikz_code": tikz_code,
+            }],
+            "figure_align": figure_align,
+            "figure_size": figure_size,
+        },
+        "score": 12,
+        "solution_space": "0.0",
+    }]
+
+    tex = build_latex_document("TikZ 插图尺寸题", "", "exam", questions)
+
+    assert (
+        rf"\adjustbox{{max width={expected_width},max height={expected_height},"
+        rf"keepaspectratio}}{{{tikz_code}}}"
+        in tex
+    )
+    assert r"\resizebox{4.5cm}{!}{" not in tex
+
+
+@pytest.mark.parametrize(
+    ("figure_align", "environment"),
+    [("bottom_left", "flushleft"), ("bottom_right", "flushright")],
+)
+def test_large_lower_figure_is_contained_in_a_safe_solution_space_box(
+    figure_align,
+    environment,
+):
+    from mathbank.paper_helper import build_latex_document
+
+    questions = [{
+        "question": {
+            "id": 107,
+            "question_type": "detailed_answer",
+            "content": "大幅插图题\n\n![](/static/uploads/tall.png)",
+            "figure_align": figure_align,
+            "figure_size": "large",
+        },
+        "score": 12,
+        "solution_space": "7.0",
+    }]
+
+    tex = build_latex_document("大图留白测试", "", "exam", questions)
+
+    assert r"max height=8.0cm" in tex
+    assert r"\par\noindent\begin{minipage}[t][8.0cm][t]{\linewidth}" in tex
+    assert rf"\begin{{{environment}}}" in tex
+    assert r"\vspace*{3.8cm}" not in tex
+    assert r"\vspace*{7.0cm}" not in tex
+
+
+@pytest.mark.parametrize(
+    ("figure_align", "environment"),
+    [("bottom_left", "flushleft"), ("bottom_right", "flushright")],
+)
+def test_multiple_large_lower_figures_remain_page_breakable(
+    figure_align,
+    environment,
+):
+    from mathbank.paper_helper import build_latex_document
+
+    images = "\n\n".join(
+        f"![图{index}](/static/uploads/large-{index}.png)"
+        for index in range(1, 5)
+    )
+    questions = [{
+        "question": {
+            "id": 108,
+            "question_type": "detailed_answer",
+            "content": f"多幅大图题\n\n{images}",
+            "figure_align": figure_align,
+            "figure_size": "large",
+        },
+        "score": 12,
+        "solution_space": "7.0",
+    }]
+
+    tex = build_latex_document("多幅大图分页测试", "", "exam", questions)
+
+    assert r"\begin{minipage}[t][32.0cm][t]{\linewidth}" not in tex
+    assert tex.count(r"max width=11.0cm,max height=8.0cm") == 4
+    assert r"\mathbankneedspace{8.5cm}" in tex
+    assert tex.count(rf"\begin{{{environment}}}") == 4
+    assert r"\vspace*{7.0cm}" in tex
+
+
+def test_latex_export_bounds_full_width_multicolumn_and_keeps_multirow():
+    from mathbank.paper_helper import build_latex_document
+
+    long_title = "综合探究表格总标题需要在页面正文宽度内自动换行显示"
+    content = (
+        r"\begin{tabular}{|c|c|c|}" "\n"
+        rf"\hline \multicolumn{{3}}{{|c|}}{{{long_title}}} \\" "\n"
+        r"\hline \multirow{2}{*}{步骤} & 思路一 & 思路二 \\" "\n"
+        r"\cline{2-3} & 完成证明一 & 完成证明二 \\" "\n"
+        r"\hline\end{tabular}"
+    )
+    questions = [{
+        "question": {
+            "id": 104,
+            "question_type": "detailed_answer",
+            "content": content,
+        },
+        "score": 12,
+        "solution_space": "0.0",
+    }]
+
+    tex = build_latex_document("合并表格题", "", "exam", questions)
+
+    assert r"\noindent\begin{tabularx}{\linewidth}" in tex
+    assert r"\multicolumn{3}{|>{\centering\arraybackslash}p{\dimexpr\linewidth-2\tabcolsep-2\arrayrulewidth\relax}|}" in tex
+    assert long_title in tex
+    assert r"\multirow{2}{*}{步骤}" in tex
+    assert r"\cline{2-3}" in tex
+
+
+@pytest.mark.parametrize(
+    "environment",
+    ["tabular", "tabular*", "tabularx", "longtable", "tblr", "longtblr", "talltblr"],
+)
+def test_latex_table_environments_keep_images_in_lr_safe_cells(environment):
+    from mathbank.paper_helper import clean_content_for_latex
+
+    source = (
+        rf"\begin{{{environment}}}{{cc}}"
+        r"图形表达 & ![](/static/uploads/cell.png) \\"
+        rf"\end{{{environment}}}"
+    )
+
+    cleaned = clean_content_for_latex(
+        source,
+        preserve_image_positions=True,
+    )
+
+    image_position = cleaned.index("cell.png")
+    begin_position = cleaned.index(rf"\begin{{{environment}}}")
+    end_position = cleaned.index(rf"\end{{{environment}}}")
+    assert begin_position < image_position < end_position
+    assert r"\adjustbox{valign=m,margin=0pt 3pt}{" in cleaned
+    assert r"\begin{center}" not in cleaned[begin_position:end_position]
+
+
+def test_right_figure_choice_stem_has_no_extra_first_line_indent():
+    from mathbank.paper_helper import build_latex_document
+
+    questions = [{
+        "question": {
+            "id": 101,
+            "question_type": "single_choice",
+            "content": (
+                "已知函数 $f(x)=x$，则 $f(1)=$\n"
+                "\\begin{choices}\n"
+                "\\item $0$\n"
+                "\\item $1$\n"
+                "\\item $2$\n"
+                "\\item $3$\n"
+                "\\end{choices}\n\n"
+                "![](/static/uploads/graph.png)"
+            ),
+            "figure_align": "right",
+        },
+        "score": 5,
+    }]
+
+    tex = build_latex_document("右图选择题", "", "exam", questions)
+
+    left_column = tex.index(r"\begin{minipage}[t]{\dimexpr\linewidth-5.8cm\relax}")
+    first_stem = tex.index(r"\noindent 已知函数", left_column)
+    right_column_end = tex.index(r"\end{minipage}", tex.index(r"\hfill", first_stem))
+    choices = tex.index(r"\begin{choices}", first_stem)
+    assert left_column < first_stem < right_column_end < choices

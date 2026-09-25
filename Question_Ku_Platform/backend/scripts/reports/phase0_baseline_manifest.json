@@ -1,0 +1,75 @@
+{
+  "practices": [
+    {
+      "name": "基线-物理-主",
+      "subject": "physics",
+      "questions": 13,
+      "id": "4013c755-c391-418b-8efa-e0dc7993f231",
+      "pages": 7,
+      "sha": "73545c56a53f7b75a365cea9edb782cc334ef6f4",
+      "pdf": "baseline_physics_main.pdf",
+      "docx": "baseline_physics_main.docx",
+      "pngs": [
+        "baseline_physics_main_page01.png",
+        "baseline_physics_main_page02.png",
+        "baseline_physics_main_page03.png",
+        "baseline_physics_main_page04.png",
+        "baseline_physics_main_page05.png",
+        "baseline_physics_main_page06.png",
+        "baseline_physics_main_page07.png"
+      ]
+    },
+    {
+      "name": "基线-数学-代表",
+      "subject": "math",
+      "questions": 8,
+      "id": "afed38c6-1209-45ef-935d-0d22a8152ead",
+      "pages": 6,
+      "sha": "70cf54303e3d0f67c9496ee1979852d251c27140",
+      "pdf": "baseline_math_rep.pdf",
+      "docx": "baseline_math_rep.docx",
+      "pngs": [
+        "baseline_math_rep_page01.png",
+        "baseline_math_rep_page02.png",
+        "baseline_math_rep_page03.png",
+        "baseline_math_rep_page04.png",
+        "baseline_math_rep_page05.png",
+        "baseline_math_rep_page06.png"
+      ]
+    },
+    {
+      "name": "基线-化学-代表",
+      "subject": "chemistry",
+      "questions": 9,
+      "id": "a4eb48db-ef10-4678-9554-5c89c5869be5",
+      "pages": 6,
+      "sha": "562cfd56b56c6a8d5f499b9d4369033198b680f6",
+      "pdf": "baseline_chemistry_rep.pdf",
+      "docx": "baseline_chemistry_rep.docx",
+      "pngs": [
+        "baseline_chemistry_rep_page01.png",
+        "baseline_chemistry_rep_page02.png",
+        "baseline_chemistry_rep_page03.png",
+        "baseline_chemistry_rep_page04.png",
+        "baseline_chemistry_rep_page05.png",
+        "baseline_chemistry_rep_page06.png"
+      ]
+    },
+    {
+      "name": "基线-英语-代表",
+      "subject": "english",
+      "questions": 8,
+      "id": "87516470-8e34-4f5a-9451-6eaaa633c49a",
+      "pages": 4,
+      "sha": "f659275061f5d9016d0533f497ecae0c9516ec57",
+      "pdf": "baseline_english_rep.pdf",
+      "docx": "baseline_english_rep.docx",
+      "pngs": [
+        "baseline_english_rep_page01.png",
+        "baseline_english_rep_page02.png",
+        "baseline_english_rep_page03.png",
+        "baseline_english_rep_page04.png"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+# Smart Question Bank Platform - Backend Dependencies
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+sqlalchemy[asyncio]==2.0.52
+aiosqlite==0.22.1
+alembic==1.19.1
+pydantic==2.13.4
+pydantic-settings==2.15.0
+httpx==0.28.1
+python-docx==1.2.0
+latex2mathml==3.81.0
+mathml2omml==0.0.2
+playwright==1.62.0
+pymupdf==1.28.2
+pillow==12.3.0
+python-multipart==0.0.9
+
+# OCR 本地通道的扫描件兜底引擎（设计文档 §10.4）：
+# 无文字层的扫描 PDF 需要它才能生成题号锚点，缺失时 physics_paper_splitter
+# 会抛 "PDF 没有文字层…请确认已安装 rapidocr_onnxruntime"。
+rapidocr-onnxruntime>=1.3

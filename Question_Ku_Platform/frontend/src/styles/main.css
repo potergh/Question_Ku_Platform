@@ -1,0 +1,1017 @@
+/*
+ * 全局样式入口（本项目此前没有全局样式文件，样式都散在各 .vue 的 scoped 里）。
+ *
+ * 只引入 theme 与 utilities，**故意不引入 preflight**：preflight 会把 margin /
+ * border / font 全部重置，目前其余页面仍是 Element Plus + scoped CSS 写的，
+ * 一开就会整片变形。等这些页面逐步迁移到工具类后，再统一决定要不要开。
+ *
+ * 引入顺序在 main.js 里排在 element-plus 之后，保证工具类能覆盖组件默认值。
+ */
+@import "tailwindcss/theme" layer(theme);
+@import "tailwindcss/utilities" layer(utilities);
+
+/*
+ * 设计令牌 —— 从参考稿（MathBank 工作台 / 题库管理两页）提取：
+ * 浅色画布 + 白卡片、蓝色主色、圆角 12px、彩色分类标签、紧凑密度。
+ * 中性色一律向品牌蓝偏一点（chroma 0.005~0.01），避免"死灰"。
+ */
+@theme {
+  /* 主色（参考稿的蓝：按钮、选中态、链接） */
+  --color-primary-50: oklch(97% 0.017 255);
+  --color-primary-100: oklch(93.5% 0.037 255);
+  --color-primary-200: oklch(88% 0.062 257);
+  --color-primary-500: oklch(55% 0.2 262);
+  --color-primary-600: oklch(50% 0.2 262);
+  --color-primary-700: oklch(44% 0.19 263);
+
+  /* 画布与表面 */
+  --color-canvas: oklch(97.2% 0.007 250);   /* 页面底色（参考稿 #f5f7fb 一档） */
+  --color-surface: oklch(100% 0 0);         /* 不透明表面：用在最需要干净的地方 */
+  --color-line: oklch(92.5% 0.009 250);     /* 描边 */
+  /* 更实一档的描边：给"必须看得见"的分隔用（页头与内容之间）。
+     --color-line 与画布只差 4.7 个亮度点，画在下限粗细的 1px 线上几乎看不见。 */
+  --color-line-strong: oklch(88% 0.014 252);
+  --color-sunken: oklch(95.6% 0.011 250);   /* 内嵌区 / hover 底 */
+
+  /*
+   * 毛玻璃体系——参考稿"高级感"的主要来源，逐条抄它的取值：
+   * 半透明面板 + backdrop blur + saturate，外加**内侧顶部高光**（这条最关键，
+   * 它模拟光线打在玻璃上缘，是 Apple 质感的标志；只加模糊和透明会显得脏）。
+   */
+  --glass-bg: rgb(255 255 255 / 0.72);       /* 主面板（参考稿 .glass-panel） */
+  --glass-bg-strong: rgb(255 255 255 / 0.9); /* 侧栏 / 工具条（要更实，避免文字发毛） */
+  --glass-bg-weak: rgb(255 255 255 / 0.55);  /* 列表项 / 次级卡（参考稿 .glass-card） */
+  --glass-border: rgb(255 255 255 / 0.55);
+  /* 玻璃面板**内部**元素的描边必须用深色发丝线：白描边压在白玻璃上等于没有边
+     （参考稿 .glass-list-item 用的就是 rgba(0,0,0,0.04)）。 */
+  --glass-line: rgb(0 0 0 / 0.06);
+  --glass-highlight: rgb(255 255 255 / 0.7);
+  --glass-blur: 20px;
+
+  /* 工作区底色的品牌光晕强度（参考稿用了 0.34 的品牌色，这里收到 0.13：太浓会抢内容） */
+  --canvas-glow: 13%;
+
+  /*
+   * 图标芯片与状态标签的成对色阶。
+   * 成对给（底 + 前景）而不是让模板自己配 bg-x-50 text-x-600：
+   * 暗色下必须整体换一套，成对才好一次性替换，也不会出现"暗底上的浅色块"。
+   */
+  --color-tint-brand: oklch(95% 0.035 255);
+  --color-tint-amber: oklch(95.5% 0.05 85);
+  --color-tint-emerald: oklch(95% 0.045 158);
+  --color-tint-rose: oklch(95% 0.035 20);
+  --color-tint-slate: oklch(95% 0.008 250);
+
+  --color-on-tint-brand: oklch(52% 0.19 262);
+  --color-on-tint-amber: oklch(57% 0.13 68);
+  --color-on-tint-emerald: oklch(52% 0.12 158);
+  --color-on-tint-rose: oklch(56% 0.18 22);
+  --color-on-tint-slate: oklch(46% 0.02 255);
+
+  /*
+   * 阴影：用带品牌色相的半透明黑，而不是纯黑。
+   * 纯黑投影会让浅底发灰发脏，偏蓝的投影才和整体配得上。
+   */
+  --shadow-xs: 0 1px 2px oklch(24% 0.03 258 / 0.05);
+  --shadow-sm: 0 1px 3px oklch(24% 0.03 258 / 0.07), 0 1px 2px oklch(24% 0.03 258 / 0.04);
+  --shadow-md: 0 4px 14px oklch(24% 0.03 258 / 0.09), 0 1px 3px oklch(24% 0.03 258 / 0.05);
+  --shadow-lg: 0 12px 32px oklch(24% 0.03 258 / 0.12), 0 2px 8px oklch(24% 0.03 258 / 0.06);
+
+  /* 文字 */
+  --color-ink: oklch(24% 0.025 258);        /* 主文字 */
+  --color-ink-soft: oklch(45% 0.02 255);    /* 次级文字 */
+  --color-ink-muted: oklch(56% 0.018 252);  /* 辅助说明 */
+
+  /* 圆角：方向 B 整体放大一档，圆润是"轻快"的主要来源 */
+  --radius-card: 16px;
+  --radius-chip: 10px;
+  --radius-control: 9px;
+
+  /* 字体：中文统一思源黑体（Noto Sans SC）；不下载 webfont —— 中文字体体积不可接受，
+     所以只声明字体名、缺失时按后面的系统栈回退（Windows/Linux 都装了 Noto Sans SC）。 */
+  --font-sans: "Noto Sans SC", "思源黑体", "Source Han Sans SC", "MiSans",
+    "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", system-ui,
+    -apple-system, "Segoe UI", sans-serif;
+  /* 极少数"印刷感"场合（品牌字、统计大数）用衬线：取思源同族，
+     未装时回退系统衬线（Songti SC / Georgia / Times New Roman）。 */
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", Georgia,
+    "Times New Roman", serif;
+
+  /*
+   * 字号档位：收敛成 6 档、档间比值 ≥1.25。
+   * 之前全站混用 11/12/13/14/15/16/22px 七个尺寸且相邻档只差 1px，
+   * 层次糊在一起——"看不出重点"是显廉价的主因之一。
+   */
+  --text-2xs: 0.6875rem;  /* 11px 徽标 */
+  --text-xs: 0.75rem;     /* 12px 辅助说明 */
+  --text-sm: 0.8125rem;   /* 13px 次级 UI / 元信息 */
+  --text-base: 0.875rem;  /* 14px 正文（产品 UI 不用流体字，保证可预测） */
+  --text-lg: 1.0625rem;   /* 17px 面板标题 */
+  --text-xl: 1.375rem;    /* 22px 页面标题 */
+  --text-2xl: 1.75rem;    /* 28px 统计大数 */
+
+  /* 行高：中文正文比西文需要更多呼吸 */
+  --leading-tight: 1.25;
+  --leading-snug: 1.45;
+  --leading-normal: 1.7;
+
+  /* 动效：只用指数缓出，不用 ease / bounce */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 150ms;
+  --dur-base: 240ms;
+  --dur-slow: 420ms;
+}
+
+/*
+ * 把设计令牌映射进 Element Plus 的变量层：
+ * 未迁移的 7 个页面不用改一行代码，按钮/输入框/标签就会跟上新配色与圆角。
+ * light-3/5/7/8/9 是 EP 的 hover / disabled 梯度，用 color-mix 现算。
+ */
+:root {
+  --el-color-primary: var(--color-primary-500);
+  --el-color-primary-dark-2: var(--color-primary-700);
+  --el-color-primary-light-3: color-mix(in oklab, var(--color-primary-500) 70%, white);
+  --el-color-primary-light-5: color-mix(in oklab, var(--color-primary-500) 50%, white);
+  --el-color-primary-light-7: color-mix(in oklab, var(--color-primary-500) 30%, white);
+  --el-color-primary-light-8: color-mix(in oklab, var(--color-primary-500) 20%, white);
+  --el-color-primary-light-9: color-mix(in oklab, var(--color-primary-500) 10%, white);
+
+  --el-border-radius-base: var(--radius-control);
+  --el-font-family: var(--font-sans);
+
+  --el-text-color-primary: var(--color-ink);
+  --el-text-color-regular: var(--color-ink-soft);
+  --el-text-color-secondary: var(--color-ink-muted);
+
+  --el-border-color: var(--color-line);
+  --el-border-color-light: var(--color-line);
+  --el-border-color-lighter: var(--color-line);
+
+  --el-fill-color-light: oklch(97% 0.008 250);
+  --el-bg-color-page: var(--color-canvas);
+}
+
+/*
+ * 暗色模式：只重定义**语义层**变量，工具类（bg-surface / text-ink 等）引用的
+ * 是同一批变量，所以整站自动跟随，组件不用改。
+ * 注意暗色不是把亮色反转：主色要提亮、底色不能用纯黑、文字要减重。
+ */
+[data-theme="dark"] {
+  --color-canvas: oklch(16.5% 0.012 255); /* 页面底：深蓝黑，不用纯黑 */
+  --color-surface: oklch(22.5% 0.013 255); /* 卡片：比底色亮一号（暗色靠亮度而不是阴影造层次） */
+  --color-line: oklch(31% 0.015 255);
+  --color-line-strong: oklch(38% 0.018 255);
+  --color-sunken: oklch(19% 0.012 255);
+
+  /* 暗色的毛玻璃：白色"膜"的 alpha 要大幅降低，否则面板会发灰发糊；
+     顶部高光也降到 0.06——暗底上的强高光会变成一条刺眼白线。 */
+  --glass-bg: rgb(255 255 255 / 0.07);
+  --glass-bg-strong: rgb(255 255 255 / 0.09);
+  --glass-bg-weak: rgb(255 255 255 / 0.05);
+  --glass-border: rgb(255 255 255 / 0.1);
+  --glass-line: rgb(255 255 255 / 0.08);
+  --glass-highlight: rgb(255 255 255 / 0.07);
+  --canvas-glow: 26%;
+
+  /* 暗色芯片：底压暗、前景提亮，整体换一套才不会有"暗底上的浅色块" */
+  --color-tint-brand: oklch(30% 0.062 262);
+  --color-tint-amber: oklch(30% 0.055 78);
+  --color-tint-emerald: oklch(30% 0.05 158);
+  --color-tint-rose: oklch(30% 0.055 20);
+  --color-tint-slate: oklch(29% 0.012 255);
+
+  --color-on-tint-brand: oklch(80% 0.12 262);
+  --color-on-tint-amber: oklch(84% 0.11 82);
+  --color-on-tint-emerald: oklch(82% 0.11 158);
+  --color-on-tint-rose: oklch(82% 0.11 20);
+  --color-on-tint-slate: oklch(78% 0.015 255);
+
+  /* 暗色下阴影要更沉，否则完全看不见 */
+  --shadow-xs: 0 1px 2px oklch(0% 0 0 / 0.4);
+  --shadow-sm: 0 1px 3px oklch(0% 0 0 / 0.45), 0 1px 2px oklch(0% 0 0 / 0.3);
+  --shadow-md: 0 4px 14px oklch(0% 0 0 / 0.5), 0 1px 3px oklch(0% 0 0 / 0.35);
+  --shadow-lg: 0 12px 32px oklch(0% 0 0 / 0.55), 0 2px 8px oklch(0% 0 0 / 0.4);
+
+  --color-ink: oklch(95% 0.004 255);
+  --color-ink-soft: oklch(82% 0.008 255);
+  --color-ink-muted: oklch(68% 0.01 255);
+
+  --color-primary-50: oklch(29% 0.06 262);
+  --color-primary-200: oklch(40% 0.1 262);
+  --color-primary-500: oklch(64% 0.18 262); /* 暗底上主色要更亮 */
+  --color-primary-600: oklch(70% 0.16 262);
+  --color-primary-700: oklch(76% 0.14 262);
+
+  /* Element Plus 的暗色变量（不引入它整包 dark css，避免体积与冲突） */
+  --el-bg-color: var(--color-surface);
+  --el-bg-color-page: var(--color-canvas);
+  --el-bg-color-overlay: var(--color-surface);
+  --el-fill-color-blank: var(--color-canvas);
+  --el-text-color-primary: var(--color-ink);
+  --el-text-color-regular: var(--color-ink-soft);
+  --el-text-color-secondary: var(--color-ink-muted);
+  --el-text-color-placeholder: var(--color-ink-muted);
+  --el-border-color: var(--color-line);
+  --el-border-color-light: var(--color-line);
+  --el-border-color-lighter: var(--color-line);
+  --el-color-primary: var(--color-primary-500);
+  --el-color-primary-light-3: color-mix(in oklab, var(--color-primary-500) 70%, black);
+  --el-color-primary-light-5: color-mix(in oklab, var(--color-primary-500) 50%, black);
+  --el-color-primary-light-7: color-mix(in oklab, var(--color-primary-500) 30%, black);
+  --el-color-primary-light-8: color-mix(in oklab, var(--color-primary-500) 20%, black);
+  --el-color-primary-light-9: color-mix(in oklab, var(--color-primary-500) 12%, black);
+  --el-fill-color: oklch(27% 0.012 255);
+  --el-fill-color-light: oklch(25% 0.012 255);
+  --el-fill-color-lighter: oklch(23% 0.012 255);
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 统计数字对齐：进度、题数、日期都用得上 */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+ * 1. 把 Element Plus 组件拉进设计令牌体系
+ *
+ * 这是"显廉价"的最大来源：EP 组件默认自带 14px 字号、32px 控件高、
+ * 投影、4px 圆角与自己的灰色阶，跟手写工具类那套令牌各说各话。
+ * 页面外壳是新的、里面的控件是旧的，看起来就是"拼的"。
+ * 这里只改视觉，不改行为与尺寸语义。
+ * ══════════════════════════════════════════════════════════════════ */
+
+.el-button {
+  --el-button-font-weight: 500;
+  font-size: var(--text-sm);
+  border-radius: var(--radius-control);
+  transition:
+    background-color var(--dur-fast) var(--ease-out-quart),
+    border-color var(--dur-fast) var(--ease-out-quart),
+    color var(--dur-fast) var(--ease-out-quart);
+}
+
+/* 次要按钮默认是"描边白底"，hover 只染描边与文字，不整块变蓝——
+   蓝是留给主操作的，满屏蓝按钮就没有重点了。 */
+.el-button--default {
+  --el-button-bg-color: var(--color-surface);
+  --el-button-border-color: var(--color-line);
+  --el-button-text-color: var(--color-ink-soft);
+  --el-button-hover-bg-color: var(--color-canvas);
+  --el-button-hover-border-color: var(--color-primary-200);
+  --el-button-hover-text-color: var(--color-primary-600);
+  --el-button-active-bg-color: var(--color-canvas);
+  --el-button-active-border-color: var(--color-primary-500);
+}
+
+.el-button.is-text {
+  --el-button-hover-bg-color: var(--color-canvas);
+}
+
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  border-radius: var(--radius-control);
+  background-color: var(--color-surface);
+  box-shadow: 0 0 0 1px var(--color-line) inset;
+  transition: box-shadow var(--dur-fast) var(--ease-out-quart);
+}
+
+.el-input__wrapper:hover,
+.el-textarea__inner:hover,
+.el-select__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--color-ink-muted) inset;
+}
+
+/* 聚焦：1px 主色描边 + 3px 柔光，比 EP 默认的粗蓝框克制 */
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused,
+.el-textarea__inner:focus {
+  box-shadow:
+    0 0 0 1px var(--color-primary-500) inset,
+    0 0 0 3px color-mix(in oklab, var(--color-primary-500) 14%, transparent);
+}
+
+.el-tag {
+  border-radius: 8px;
+  font-weight: 500;
+  font-size: var(--text-xs);
+  border-color: transparent;
+  padding-inline: 8px;
+}
+
+/* 方向 B：允许一层很轻的投影——层次感是"轻快"的来源，
+   但只给一档，且用带品牌色相的半透明黑，不用纯黑。 */
+.el-card {
+  border-radius: var(--radius-card);
+  border-color: var(--color-line);
+  box-shadow: var(--shadow-sm) !important;
+}
+
+/* 主按钮：唯一有色彩的按钮，给一点投影把它"垫起来" */
+.el-button--primary {
+  box-shadow: 0 1px 2px color-mix(in oklab, var(--color-primary-500) 28%, transparent);
+}
+
+.el-button--primary:hover {
+  box-shadow: 0 2px 8px color-mix(in oklab, var(--color-primary-500) 32%, transparent);
+}
+
+.el-dialog,
+.el-message-box {
+  border-radius: var(--radius-card);
+}
+
+.el-alert {
+  border-radius: var(--radius-card);
+  padding: 12px 14px;
+}
+
+.el-collapse,
+.el-collapse-item__header,
+.el-collapse-item__wrap {
+  border-color: var(--color-line);
+  background: transparent;
+}
+
+.el-collapse-item__header {
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.el-table {
+  --el-table-border-color: var(--color-line);
+  --el-table-header-bg-color: var(--color-canvas);
+  --el-table-row-hover-bg-color: var(--color-canvas);
+  font-size: var(--text-sm);
+}
+
+.el-table th.el-table__cell {
+  font-weight: 600;
+  color: var(--color-ink-soft);
+}
+
+.el-popper,
+.el-select-dropdown,
+.el-dropdown-menu {
+  border-radius: var(--radius-control) !important;
+  border-color: var(--color-line) !important;
+}
+
+.el-radio-button__inner {
+  border-color: var(--color-line);
+  font-size: var(--text-sm);
+}
+
+.el-checkbox__label,
+.el-radio__label {
+  font-size: var(--text-base);
+}
+
+.el-pagination {
+  --el-pagination-font-size: var(--text-sm);
+  font-weight: 400;
+}
+
+/*
+ * EP 默认空状态插画是灰色 3D 盒子，和这套设计毫无关系，且散落在练习编辑器、
+ * 题库列表、标签管理多处。统一收成"安静的文字空状态"；
+ * 需要视觉重量的页面（工作台/导入）自己用 icon-chip 写空状态，不依赖插画。
+ */
+.el-empty__image {
+  display: none;
+}
+
+.el-empty {
+  padding: 44px 0;
+}
+
+.el-empty__description {
+  margin-top: 0;
+}
+
+.el-empty__description p {
+  color: var(--color-ink-muted);
+  font-size: var(--text-sm);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+ * 2. 基础排版与交互细节
+ *
+ * 放进 @layer base：未分层的自定义样式会无条件压过工具类，
+ * 那会让页面里"用 text-lg / tracking-wide 微调"永远不生效。
+ * ══════════════════════════════════════════════════════════════════ */
+
+@layer base {
+/*
+ * 最小 reset。**故意不引入 Tailwind preflight**——它会重排 margin/border，
+ * 把还没迁移的 EP 老页面整片打歪。
+ * 但原生 button 在 Chrome 里自带"灰底 + 圆角描边"的系统外观，
+ * 不重置的话，所有自绘的列表行/分段控件/图标按钮都会露出系统按钮的样子。
+ *
+ * 顺带记一条容易踩的：**这里没有 box-sizing: border-box**，全局是 content-box。
+ * 所以写 `width: 100%` + 内边距的元素会比容器宽出内边距那么多（侧栏导航就这样被
+ * 撑出过横向滚动条）。要么改用块级默认铺满，要么自己加 border-box。
+ */
+button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  appearance: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img {
+  max-width: 100%;
+}
+
+/*
+ * 段落与标题的 UA 外边距（<p> 上下各 1em）也必须清掉。
+ * 实测：统计卡里一个 div 的内容只有 52px，却被段落外边距撑到 119px，
+ * 卡片因此高达 153px——这种"莫名其妙的空隙"全站普遍存在，根因都是缺 preflight。
+ * 正文渲染容器里再恢复（那里段落间距是有意义的）。
+ */
+p,
+figure,
+blockquote,
+dl,
+dd,
+pre,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+}
+
+/*
+ * 列表同理：无 preflight 时 <ul> 自带圆点 + 40px 左缩进，
+ * 实测会把自绘的列表行顶出一截，并在每行前多一个圆点。
+ * 全站清掉，只给"正文渲染"容器恢复——那里的列表是题目内容的一部分。
+ */
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.q-content ul,
+.q-content ol,
+.q-preview ul,
+.q-preview ol,
+.rich ul,
+.rich ol,
+.rich-opt ul,
+.rich-opt ol,
+.rendered-preview ul,
+.rendered-preview ol,
+.preview-box ul,
+.preview-box ol,
+.item-content ul,
+.item-content ol,
+.rec-content ul,
+.rec-content ol,
+[contenteditable] ul,
+[contenteditable] ol {
+  margin: 0.35em 0;
+  padding-inline-start: 1.35em;
+  list-style: revert;
+}
+
+/* 正文容器里恢复段落间距（上面刚把 <p> 的 UA 外边距清零） */
+.q-content p,
+.q-preview p,
+.rich p,
+.rich-opt p,
+.rendered-preview p,
+.preview-box p,
+.item-content p,
+.rec-content p,
+[contenteditable] p {
+  margin: 0.45em 0;
+}
+
+.q-content blockquote,
+.rich blockquote,
+.rendered-preview blockquote,
+.rec-content blockquote {
+  margin: 0.5em 0;
+  padding-left: 0.8em;
+  border-left: 3px solid var(--color-line);
+  color: var(--color-ink-soft);
+}
+
+body {
+  /*
+   * body 的 UA 默认 margin 是 8px，本项目没引 preflight 所以一直没被清掉。
+   * 后果不只是"页面外侧多一条滚动条"：.app-shell 是 h-screen（100vh），被这
+   * 8px 顶下去之后，**底部 8px 正好落在视口外**——实测 shellTop=8、shellBottom=708
+   * 而视口高 700，侧栏与内容的下沿一直是被截掉的；同时 html.scrollHeight 变成
+   * 716 = 700 + 16，于是外层多出滚动条、内层 .app-main 自己也在滚，右边就是两条。
+   */
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  letter-spacing: 0.008em;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.012em;
+  line-height: var(--leading-tight);
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-primary-500) 20%, transparent);
+}
+
+/* 焦点环：键盘可见、鼠标不打扰（EP 大量组件把 outline 干掉了，
+   这里统一补回，否则纯键盘操作完全看不见位置） */
+:focus-visible {
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
+}
+
+.el-button:focus-visible,
+.el-input__wrapper:focus-within {
+  outline: none;
+}
+
+/* 滚动条：默认那根灰条在浅底上非常抢眼 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--color-ink-muted) 32%, transparent) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--color-ink-muted) 30%, transparent);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--color-ink-muted) 50%, transparent);
+  background-clip: content-box;
+}
+}
+
+/* ══════════════════════════════════════════════════════════════════
+ * 3. 动效：一次编排好的入场，胜过满屏零碎微交互
+ * ══════════════════════════════════════════════════════════════════ */
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/*
+ * 整页入场：容器加 .page-enter，子项加 style="--i:N" 即成阶梯。
+ *
+ * 填充模式必须是 backwards，**不能写 both**：
+ * both 含 forwards，动画结束后最终关键帧会永久生效，而 Chrome 会把关键帧里的
+ * `transform: none` 解析成 `matrix(1,0,0,1,0,0)`（不等于 none）。带 transform 的
+ * 元素会成为 position:fixed 后代的**包含块** —— 于是页内所有 el-dialog 的
+ * .el-overlay 都不再按视口定位，而是被困在 .page-shell 的盒子里（实测 overlay
+ * 尺寸变成 0×0，弹窗高 4487px 却完全滚不动，底部按钮点不到）。
+ *
+ * backwards 只在延迟期间套用起始关键帧（这正是它的用途：防"先闪一下终态"），
+ * 动画结束后元素回到自身基础样式，transform 真正消失。
+ */
+.page-enter > * {
+  animation: rise-in var(--dur-slow) var(--ease-out-expo) backwards;
+  animation-delay: calc(var(--i, 0) * 55ms);
+}
+
+.page-enter {
+  animation: rise-in var(--dur-slow) var(--ease-out-expo) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .page-enter > * {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+ * 4. 页面骨架：三种骨架类，全站统一，免得每页各写一套
+ *
+ * 放进 @layer components 而不是裸写：裸写（unlayered）会压过一切工具类，
+ * 于是"组件类定基调、工具类微调"这条最基本的用法会失效。
+ * 注意 Element Plus 自身的样式是未分层的，所以第 1 节的 EP 覆盖必须留在层外。
+ * ══════════════════════════════════════════════════════════════════ */
+
+@layer components {
+/* 页壳：顶部收紧（用户反馈"顶部栏占太多高度"），内容才是主角 */
+.page-shell {
+  padding: 14px 24px 40px;
+  max-width: 1440px;
+  margin-inline: auto;
+}
+
+@media (max-width: 900px) {
+  .page-shell {
+    padding: 12px 14px 32px;
+  }
+}
+
+/*
+ * 页头做成"单行工具条"：标题与说明横向并排，不再上下堆两行。
+ * 两行堆叠的页头会白白吃掉约 40px 视口高度，而这层信息一行足够装下。
+ */
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  /* 页头与内容之间压一条发丝线：单行工具条不划线时，标题与下方统计卡/面板
+     会糊成一片，层次只能靠留白硬撑。划线之后"功能区"与"内容区"一眼分开。
+     线用 --color-line-strong（比描边深一档）而不是 --color-line：
+     后者与画布只差几个亮度点，1px 宽下等于没画。 */
+  padding-bottom: 12px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--color-line-strong);
+  /* 线下再垫一层极淡的向下投影。只画线像表格边框，只投影又糊，
+     两者叠起来才像"被光照到的工具条下缘"，和站内的玻璃质感同一套逻辑。 */
+  box-shadow: 0 6px 12px -10px oklch(24% 0.03 258 / 0.2);
+}
+
+.page-title {
+  font-size: var(--text-lg);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--color-ink);
+}
+
+.page-subtitle {
+  margin-top: 0;
+  font-size: var(--text-xs);
+  color: var(--color-ink-muted);
+}
+
+/* 说明文字前的分隔点：单行页头里用它替代换行 */
+.page-subtitle::before {
+  margin-right: 10px;
+  color: var(--color-line);
+  content: '·';
+}
+
+/* 面板：只描边，不投影；标题行用发丝线分隔而不是再套一层卡 */
+.panel {
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  /* 参考稿的毛玻璃三件套：半透明底 + 模糊/饱和 + 内侧顶部高光。
+     只做前两项会"发脏"，那道 inset 高光才是光泽感的来源。 */
+  /* 顺序必须是"先前缀、后标准"：写成标准在前时，压缩器会把标准那条当重复丢掉，
+     结果整条毛玻璃静默失效（实测：产物里只剩 -webkit- 版本）。 */
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--shadow-sm);
+}
+
+/* 面板内的滚动区：卡片高度设上限，内容超出时在**卡片内部**滚动，
+   而不是把整页越撑越长。并排的面板等高才好读。 */
+.panel-scroll {
+  max-height: 26rem;
+  overflow-y: auto;
+}
+
+.panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 14px;
+}
+
+.panel-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.panel-hint {
+  margin-top: 4px;
+  font-size: var(--text-xs);
+  color: var(--color-ink-muted);
+}
+
+/*
+ * 分段控件：两个视图二选一（题库管理的「本地题库 / 待复核」）。
+ * 选中态用**主色实底**，与侧栏选中项、主按钮共用同一套语言。
+ * 上一版是"白底 + 细阴影"，可它压在白面板上、四周又都是留白，
+ * 切换时几乎看不出变化 —— 反馈不明确的分段控件等于没有反馈。
+ * 容器做内凹（下沉底 + 内阴影）：选中项才浮得起来。
+ */
+.segmented {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-control);
+  background: var(--color-sunken);
+  box-shadow: inset 0 1px 2px oklch(24% 0.03 258 / 0.07);
+}
+
+.segment {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: calc(var(--radius-control) - 3px);
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--color-ink-soft);
+  transition:
+    background-color var(--dur-fast) var(--ease-out-quart),
+    color var(--dur-fast) var(--ease-out-quart),
+    box-shadow var(--dur-base) var(--ease-out-expo);
+}
+
+.segment:hover:not(.segment--active) {
+  background: color-mix(in oklab, var(--color-primary-500) 10%, transparent);
+  color: var(--color-ink);
+}
+
+.segment--active {
+  background: var(--color-primary-500);
+  color: white;
+  font-weight: 600;
+  box-shadow: 0 2px 8px color-mix(in oklab, var(--color-primary-500) 30%, transparent);
+}
+
+/* 计数徽标（待复核的条数）。跟随分段配色，选中时换半透明白底 —— 
+   实底上再用灰底徽标会糊成一块。 */
+.segment__badge {
+  min-width: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-ink-muted) 18%, transparent);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.segment--active .segment__badge {
+  background: rgb(255 255 255 / 0.28);
+  color: white;
+}
+
+/*
+ * 长内容弹窗：正文限高 + 内部滚动，标题与底部按钮始终可见。
+ * 不加这一条的话，弹窗会随内容一路长下去 —— 实测「练习组卷」点开一份 50 题的
+ * 练习，dialog 高 4487px 而视口只有 950px，底部按钮根本够不着
+ * （而且它内部不滚动、页面又被 el-popup-parent--hidden 锁住了滚动）。
+ * 用 .el-dialog__body 而不是整窗限高，是为了让头尾不动、只滚正文。
+ */
+.dialog-scroll-body .el-dialog__body {
+  max-height: 68vh;
+  overflow-y: auto;
+}
+
+/*
+ * 上传前的模式确认框（导入页）。
+ * ElMessageBox 渲染在组件树之外，所以样式必须全局，写不进页面的 scoped。
+ * 类名前缀 uc- = upload confirm。
+ */
+.uc { font-size: 14px; line-height: 1.6; }
+.uc-mode { display: flex; align-items: center; gap: 8px; }
+.uc-label { font-size: var(--text-xs); color: var(--color-ink-muted); }
+/* 模式名是这一眼要看清的东西：主色 + 比正文大一号 */
+.uc-value { font-size: var(--text-lg); font-weight: 650; color: var(--color-primary-600); }
+.uc-hint { margin-top: 2px; font-size: var(--text-sm); color: var(--color-ink-soft); }
+.uc-files { margin-top: 10px; font-size: var(--text-xs); color: var(--color-ink-muted); word-break: break-all; }
+/* 配置冲突（选了 MinerU 却没 Token 之类）：成对色阶，暗色下自动换一套 */
+.uc-warn {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  background: var(--color-tint-amber);
+  color: var(--color-on-tint-amber);
+  font-size: var(--text-sm);
+}
+
+/*
+ * 次级玻璃面：列表项、内嵌卡。
+ * 故意**不加 backdrop-filter**：它已经在毛玻璃面板之内，再模糊一层既没有视觉收益，
+ * 又会显著增加合成开销（参考稿叠了两层，我按性能取舍只留一层）。
+ */
+.glass-item {
+  border: 1px solid var(--glass-line);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg-weak);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+  transition:
+    background-color var(--dur-fast) var(--ease-out-quart),
+    border-color var(--dur-fast) var(--ease-out-quart),
+    box-shadow var(--dur-base) var(--ease-out-expo),
+    transform var(--dur-base) var(--ease-out-expo);
+}
+
+.glass-item:hover {
+  border-color: color-mix(in oklab, var(--color-primary-500) 30%, var(--glass-border));
+  background: var(--glass-bg);
+}
+
+/* 工作区底色：品牌色柔光晕 + 画布色（抄参考稿 .bank-workspace 的做法）。
+   纯平底色怎么调都像后台模板；一层很淡的品牌色径向光晕立刻有纵深。 */
+.app-main {
+  background:
+    radial-gradient(
+      56rem 30rem at 76% -12%,
+      color-mix(in oklab, var(--color-primary-500) var(--canvas-glow), transparent),
+      transparent 62%
+    ),
+    var(--color-canvas);
+}
+
+/*
+ * 图标芯片：方向 B 恢复"图标带色"，但用成对色阶（bg-tint-x / text-on-tint-x），
+ * 而不是让模板各处随手写 bg-amber-50 text-amber-600——那样暗色下必然露馅，
+ * 也必然配出五花八门的颜色。
+ */
+.icon-chip {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: var(--radius-chip);
+}
+
+.icon-chip--sm {
+  width: 30px;
+  height: 30px;
+}
+
+.icon-chip--lg {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+}
+
+/*
+ * 统计卡：白底 + 柔投影 + hover 微抬。
+ * "同尺寸网格"本身不丢人，丢人的是没有层次差异——所以数字放大到 28px、
+ * 标签压到 13px、芯片带色，靠对比撑起来，而不是靠加装饰。
+ */
+/* 横向布局（芯片在左、数字在右）：竖排会把卡片撑到 200px，
+   四个指标就吃掉半个首屏。横扫一眼也是更快的信息读取方式。 */
+.stat-card {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--shadow-sm);
+  transition:
+    transform var(--dur-base) var(--ease-out-expo),
+    box-shadow var(--dur-base) var(--ease-out-expo),
+    border-color var(--dur-base) var(--ease-out-quart);
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-primary-200);
+  box-shadow: var(--shadow-md);
+}
+
+.stat-card__value {
+  font-size: var(--text-2xl);
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--color-ink);
+}
+
+.stat-card__label {
+  margin-top: 2px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-ink-soft);
+}
+
+.stat-card__hint {
+  font-size: var(--text-xs);
+  color: var(--color-ink-muted);
+}
+
+/* 只对子项做阶梯入场：父容器若已带 .page-enter，孙子层用这个补阶梯。
+   同样是 backwards，理由见 .page-enter 那段。 */
+.stagger > * {
+  animation: rise-in var(--dur-slow) var(--ease-out-expo) backwards;
+  animation-delay: calc(var(--i, 0) * 55ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stagger > * {
+    animation: none;
+  }
+}
+
+/* 可点击的卡片：hover 抬起，明确"这里能进" */
+.card-interactive {
+  transition:
+    transform var(--dur-base) var(--ease-out-expo),
+    box-shadow var(--dur-base) var(--ease-out-expo),
+    border-color var(--dur-base) var(--ease-out-quart);
+}
+
+.card-interactive:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-primary-200);
+  box-shadow: var(--shadow-md);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stat-card:hover,
+  .card-interactive:hover {
+    transform: none;
+  }
+}
+
+/* 列表行：hover 才露出次要操作，默认安静（渐进披露） */
+.row-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 20px;
+  transition: background-color var(--dur-fast) var(--ease-out-quart);
+}
+
+.row-item:hover {
+  /* 毛玻璃面板上的 hover 用主色微染，比灰底更"亮"也更贵 */
+  background: color-mix(in oklab, var(--color-primary-500) 6%, transparent);
+}
+
+.row-actions {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out-quart);
+}
+
+.row-item:hover .row-actions,
+.row-item:focus-within .row-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  /* 触摸设备没有 hover，操作必须常显 */
+  .row-actions {
+    opacity: 1;
+  }
+}
+}

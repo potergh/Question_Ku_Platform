@@ -1,0 +1,152 @@
+{
+  "model": "qwen-vl-max",
+  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "reports": [
+    {
+      "name": "物-9暑-05-固体、液体压强选择-吴马倩.pdf",
+      "path": "D:\\tiku_9.10\\Question_Ku_Platform\\test_data\\物-9暑-05-固体、液体压强选择-吴马倩.pdf",
+      "markers": {
+        "pages": 25,
+        "examples": 36,
+        "inline_answers": 75,
+        "suizang_blocks": 2
+      },
+      "doc_kind": "handout",
+      "question_count": 75,
+      "review_count": 48,
+      "excluded_count": 0,
+      "coverage_ratio": 1.0,
+      "lost_chars": 0,
+      "answer_match_ratio": 1.0,
+      "answer_matched": 75,
+      "orphan_pages": [],
+      "blocked": false,
+      "reasons": [],
+      "example_cut": 36,
+      "suizang_cut": 39,
+      "inline_answer_total": 75,
+      "inline_answer_matched": 75,
+      "labels": [
+        "【例1】",
+        "【例2】",
+        "【例3】",
+        "【例1】",
+        "【例2】",
+        "【例3】",
+        "【例1】",
+        "【例2】",
+        "【例3】",
+        "【例1】",
+        "【例2】",
+        "【例1】",
+        "【例2】",
+        "【例1】",
+        "【例2】",
+        "【例1】",
+        "【例2】",
+        "【例1】",
+        "【例2】",
+        "【例3】",
+        "【例1】",
+        "【例2】",
+        "【例3】",
+        "【例1】",
+        "【例1】",
+        "【例2】",
+        "【例3】",
+        "【例4】",
+        "【例5】",
+        "【例6】",
+        "【例7】",
+        "【例8】",
+        "【例9】",
+        "【例1】",
+        "【例2】",
+        "【例1】",
+        "1、",
+        "2、",
+        "3、",
+        "4、",
+        "5、",
+        "6、",
+        "7、",
+        "8、",
+        "9、",
+        "10、",
+        "11、",
+        "12、",
+        "13、",
+        "14、",
+        "15、",
+        "16、",
+        "17、",
+        "18、",
+        "19、",
+        "1、",
+        "2、",
+        "3、",
+        "4、",
+        "5、",
+        "6、",
+        "7、",
+        "8、",
+        "9、",
+        "10、",
+        "11、",
+        "12、",
+        "13、",
+        "14、",
+        "15、",
+        "16、",
+        "17、",
+        "18、",
+        "19、",
+        "20、"
+      ],
+      "checks": [
+        {
+          "name": "切出题数>0",
+          "ok": true,
+          "note": "75 题"
+        },
+        {
+          "name": "审计闸门放行",
+          "ok": true,
+          "note": "放行"
+        },
+        {
+          "name": "覆盖率≥95%",
+          "ok": true,
+          "note": "100.0%（丢失 0 字）"
+        },
+        {
+          "name": "无孤儿页",
+          "ok": true,
+          "note": "孤儿页 无"
+        },
+        {
+          "name": "行内【答案】全中",
+          "ok": true,
+          "note": "75/75"
+        },
+        {
+          "name": "【例N】全切出",
+          "ok": true,
+          "note": "36/36"
+        },
+        {
+          "name": "题数对齐【答案】数",
+          "ok": true,
+          "note": "75/75"
+        },
+        {
+          "name": "【例N】+随堂检测两套编号",
+          "ok": true,
+          "note": "例 36 题 / 随堂 39 题"
+        }
+      ],
+      "passed": true,
+      "result_dir": "D:\\tiku_9.10\\Question_Ku_Platform\\data\\ocr_output\\物-9暑-05-固体、液体压强选择-吴马倩__v12"
+    }
+  ]
+}

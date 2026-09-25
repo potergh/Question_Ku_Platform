@@ -1,0 +1,72 @@
+{
+  "practices": [
+    {
+      "id": "1e5faf6b-3519-4bf8-8ba4-708225a490f9",
+      "title": "练习测试",
+      "subject": "物理",
+      "grade": "中考",
+      "subtitle": null,
+      "page_config": null,
+      "questions": 2,
+      "types": {
+        "multiple_choice": 2
+      },
+      "formula_questions": 0,
+      "image_questions": 2,
+      "option_image_questions": 0,
+      "answer_space_blocks": 2,
+      "total_text_chars": 255,
+      "migration_status": "done"
+    },
+    {
+      "id": "daf6a44c-2641-45f5-83de-b4a8bf12d932",
+      "title": "初三上混合练习",
+      "subject": "物理",
+      "grade": "中考",
+      "subtitle": null,
+      "page_config": "{\"show_info_bar\": false, \"margin_preset\": \"normal\", \"show_page_number\": true, \"show_score\": false, \"show_total_score\": false}",
+      "questions": 9,
+      "types": {
+        "single_choice": 9
+      },
+      "formula_questions": 0,
+      "image_questions": 6,
+      "option_image_questions": 0,
+      "answer_space_blocks": 9,
+      "total_text_chars": 1212,
+      "migration_status": "done"
+    },
+    {
+      "id": "8c26369f-1e7d-4c28-974d-9bd6104b0433",
+      "title": "1",
+      "subject": null,
+      "grade": null,
+      "subtitle": null,
+      "page_config": null,
+      "questions": 10,
+      "types": {
+        "single_choice": 10
+      },
+      "formula_questions": 0,
+      "image_questions": 0,
+      "option_image_questions": 0,
+      "answer_space_blocks": 10,
+      "total_text_chars": 578,
+      "migration_status": "done"
+    }
+  ],
+  "bank_by_subject": {
+    "chemistry": 26,
+    "english": 44,
+    "math": 25,
+    "physics": 100
+  },
+  "bank_types": {
+    "comprehensive": 31,
+    "experiment": 2,
+    "fill_blank": 34,
+    "multiple_choice": 12,
+    "single_choice": 89,
+    "unknown": 27
+  }
+}

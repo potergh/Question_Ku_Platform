@@ -1,0 +1,95 @@
+{
+  "model": "qwen-vl-max",
+  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "reports": [
+    {
+      "name": "2026河东区一模物理试卷.pdf",
+      "path": "D:\\tiku_9.10\\Question_Ku_Platform\\test_data\\2026河东区一模物理试卷.pdf",
+      "markers": {
+        "pages": 10,
+        "examples": 0,
+        "inline_answers": 0,
+        "suizang_blocks": 0
+      },
+      "doc_kind": "paper",
+      "question_count": 25,
+      "review_count": 25,
+      "excluded_count": 0,
+      "coverage_ratio": 0.8657,
+      "lost_chars": 426,
+      "answer_match_ratio": 0.0,
+      "answer_matched": 0,
+      "orphan_pages": [],
+      "blocked": true,
+      "reasons": [
+        "答案匹配率 0.0% 低于阈值 80%（0/25）。",
+        "内容覆盖率 86.6% 低于阈值 95%，有 426 字未进入任何题卡。"
+      ],
+      "example_cut": 0,
+      "suizang_cut": 25,
+      "inline_answer_total": 0,
+      "inline_answer_matched": 0,
+      "labels": [
+        "1．",
+        "2．",
+        "3.",
+        "4.",
+        "5.",
+        "6.",
+        "7.",
+        "8.",
+        "9.",
+        "10.",
+        "11．",
+        "12．",
+        "13．",
+        "14.",
+        "15.",
+        "16.",
+        "17.",
+        "18.",
+        "19.",
+        "20.",
+        "21.",
+        "22.",
+        "23.",
+        "24.",
+        "25."
+      ],
+      "checks": [
+        {
+          "name": "切出题数>0",
+          "ok": true,
+          "note": "25 题"
+        },
+        {
+          "name": "审计闸门放行",
+          "ok": false,
+          "note": "答案匹配率 0.0% 低于阈值 80%（0/25）。；内容覆盖率 86.6% 低于阈值 95%，有 426 字未进入任何题卡。"
+        },
+        {
+          "name": "覆盖率≥95%",
+          "ok": false,
+          "note": "86.6%（丢失 426 字）"
+        },
+        {
+          "name": "无孤儿页",
+          "ok": true,
+          "note": "孤儿页 无"
+        },
+        {
+          "name": "行内【答案】全中",
+          "ok": true,
+          "note": "无行内答案标记，跳过"
+        },
+        {
+          "name": "【例N】全切出",
+          "ok": true,
+          "note": "原文无【例N】标记，跳过"
+        }
+      ],
+      "passed": false,
+      "result_dir": "D:\\tiku_9.10\\Question_Ku_Platform\\data\\ocr_output\\2026河东区一模物理试卷__golden"
+    }
+  ]
+}

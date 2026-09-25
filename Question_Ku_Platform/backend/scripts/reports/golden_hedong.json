@@ -1,0 +1,58 @@
+{
+  "model": "qwen-vl-max",
+  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "reports": [
+    {
+      "name": "2026河东区一模物理试卷.pdf",
+      "path": "D:\\tiku_9.10\\Question_Ku_Platform\\test_data\\2026河东区一模物理试卷.pdf",
+      "markers": {
+        "pages": 10,
+        "examples": 0,
+        "inline_answers": 0,
+        "suizang_blocks": 0
+      },
+      "doc_kind": "paper",
+      "question_count": 0,
+      "review_count": 0,
+      "excluded_count": 0,
+      "coverage_ratio": 1.0,
+      "lost_chars": 0,
+      "answer_match_ratio": null,
+      "answer_matched": 0,
+      "orphan_pages": [],
+      "blocked": true,
+      "reasons": [
+        "没有切出任何题目。"
+      ],
+      "example_cut": 0,
+      "suizang_cut": 0,
+      "inline_answer_total": 0,
+      "inline_answer_matched": 0,
+      "labels": [],
+      "checks": [
+        {
+          "name": "覆盖率≥95%",
+          "ok": true,
+          "note": "100.0%（丢失 0 字）"
+        },
+        {
+          "name": "无孤儿页",
+          "ok": true,
+          "note": "孤儿页 无"
+        },
+        {
+          "name": "行内【答案】全中",
+          "ok": true,
+          "note": "无行内答案标记，跳过"
+        },
+        {
+          "name": "【例N】全切出",
+          "ok": true,
+          "note": "原文无【例N】标记，跳过"
+        }
+      ],
+      "passed": true,
+      "result_dir": "D:\\tiku_9.10\\Question_Ku_Platform\\data\\ocr_output\\2026河东区一模物理试卷__golden"
+    }
+  ]
+}

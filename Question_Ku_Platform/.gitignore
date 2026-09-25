@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Data (runtime)
+data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+frontend/dist/
+
+# Environment
+.env
+
+# pytest
+.pytest_cache/
+htmlcov/
+.coverage
+
+# 导出验证产物（可再生，不入库）
+backend/*.docx
+re_export.docx
+verify_export.docx
+
+backend/_uvicorn.log
+backend/_uvicorn_err.log
+
+# 页面截图自查产物（frontend/scripts/shots.mjs 生成，可再生，不入库）
+frontend/_shots/
+
+# 本地 UI 联调临时目录（服务日志、改名的上传副本）
+_ui_upload/
+
+# 部署副本：由主目录同步生成（sync 脚本/copy），可在任意机器重建
+_deploy_clean/
+
+# IDE 插件目录（brainstorming 等 skill 文档，非项目代码）
+.qoder/
+
+# 会话性产物：验收截图、更新记录（本地资料，需要入库时手动移除本行）
+Survey/
+update/
+
+# 水印清洗副本（prepare_pdf 运行时生成，test_data 的镜像）
+test_data/.clean/
+
+# 一次性诊断探针（数据报告在 data/_probe_*，脚本属会话产物）
+backend/scripts/_probe_*.py
+
+# 日志
+*.log

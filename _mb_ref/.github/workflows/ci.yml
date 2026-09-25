@@ -1,0 +1,213 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }} / tests and static JS
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install locked dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - name: Verify dependency consistency
+        run: python -m pip check
+      - name: Run test suite
+        run: python -m pytest tests/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Parse browser JavaScript
+        shell: bash
+        run: |
+          for script in static/js/*.js; do
+            node --check "$script"
+          done
+
+  pandoc-native:
+    name: Native Pandoc installation / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install isolated test runner
+        run: python -m pip install --disable-pip-version-check pytest==9.0.3
+      - name: Verify real download, Unicode paths, OMML and cached reinstallation
+        env:
+          MATHBANK_TEST_PANDOC_NATIVE: "1"
+        run: python -m pytest --noconftest tests/test_runtime_components.py
+
+  release-guards:
+    name: Release guards / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install guard-test runner
+        run: python -m pip install --disable-pip-version-check pytest==9.0.3
+      - name: Run Release and launcher guard tests without app conftest
+        run: python -m pytest --noconftest tests/test_release_hardening.py tests/test_windows_launcher.py
+      - name: Build, package, and import-smoke the embedded Windows runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -c "from scripts import build_release as b; b.clean_directories(); b.download_python(); b.download_and_extract_sqlite(); b.download_and_extract_msvc_runtime(); b.configure_python_path(); b.download_and_extract_wheels(); b.copy_app_files(b.BUILD_DIR, b.WINDOWS_LAUNCHER_NAME); b.create_launcher(); b.validate_windows_runtime(b.BUILD_DIR); b.zip_release()"
+      - name: Start and reopen the packaged Windows service
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $PWD 'dist\MathBank-Windows-x64.zip'
+          $testRoot = Join-Path $env:RUNNER_TEMP (
+            'MathBank 中文 空格 启动-' + [Guid]::NewGuid().ToString('N')
+          )
+          New-Item -ItemType Directory -Path $testRoot | Out-Null
+          Expand-Archive -LiteralPath $archive -DestinationPath $testRoot
+          $launcher = Join-Path $testRoot '启动题库系统.bat'
+          $statePath = Join-Path $testRoot '.system_generated\server-state.json'
+          $env:MATHBANK_NO_PAUSE = '1'
+          $env:MATHBANK_NO_BROWSER = '1'
+          $stateDirectory = Join-Path $testRoot '.system_generated'
+          New-Item -ItemType Directory -Path $stateDirectory | Out-Null
+          Set-Content -LiteralPath $statePath -Value 'invalid old state'
+          Set-Content -LiteralPath (Join-Path $stateDirectory 'installed-release-manifest.json') `
+            -Value 'invalid historical manifest'
+          $sleeper = Start-Process -FilePath "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" `
+            -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 300') -PassThru
+          Set-Content -LiteralPath (Join-Path $stateDirectory 'server.pid') -Value $sleeper.Id
+
+          function Invoke-PackagedLauncher {
+            # Pass cmd's command line verbatim, without PowerShell re-quoting it.
+            $start = [Diagnostics.ProcessStartInfo]::new()
+            $start.FileName = $env:ComSpec
+            $start.Arguments = '/d /s /c ""{0}""' -f $launcher
+            $start.UseShellExecute = $false
+            $start.RedirectStandardOutput = $true
+            $start.RedirectStandardError = $true
+            $start.StandardOutputEncoding = [Text.Encoding]::UTF8
+            $start.StandardErrorEncoding = [Text.Encoding]::UTF8
+            $process = [Diagnostics.Process]::Start($start)
+            $stdout = $process.StandardOutput.ReadToEndAsync()
+            $stderr = $process.StandardError.ReadToEndAsync()
+            $process.WaitForExit()
+            $output = $stdout.GetAwaiter().GetResult() + $stderr.GetAwaiter().GetResult()
+            $exitCode = $process.ExitCode
+            $process.Dispose()
+            Write-Host $output
+            if ($exitCode -ne 0) {
+              throw "Packaged launcher failed with exit code $exitCode."
+            }
+            if ($output.Contains("��")) {
+              throw 'Packaged launcher output contains Unicode replacement characters.'
+            }
+            if ($output -match '(?i)is not recognized as an internal or external command') {
+              throw 'cmd.exe parsed part of the packaged launcher output as a command.'
+            }
+          }
+
+          try {
+            Invoke-PackagedLauncher
+            $first = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+            if ($null -eq (Get-Process -Id ([int]$first.pid) -ErrorAction SilentlyContinue)) {
+              throw 'The first packaged service process is not running.'
+            }
+
+            Invoke-PackagedLauncher
+            $second = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+            if ([string]$second.launch_id -ne [string]$first.launch_id) {
+              throw 'A repeated double click replaced the existing service.'
+            }
+            $sleeper.Refresh()
+            if ($sleeper.HasExited) {
+              throw 'The launcher stopped an unrelated process from an old PID file.'
+            }
+
+            $request = [Net.HttpWebRequest]::Create('http://127.0.0.1:8000/healthz')
+            $request.Proxy = $null
+            $request.KeepAlive = $false
+            $request.Timeout = 2000
+            $response = $request.GetResponse()
+            $reader = New-Object IO.StreamReader($response.GetResponseStream())
+            $health = ($reader.ReadToEnd() | ConvertFrom-Json)
+            $response.Close()
+            if ([string]$health.server_instance_id -ne [string]$second.launch_id) {
+              throw 'Health response is not bound to the restarted launch ID.'
+            }
+          }
+          finally {
+            $sleeper.Refresh()
+            if (-not $sleeper.HasExited) {
+              $sleeper.Kill()
+              $sleeper.WaitForExit()
+            }
+            if (Test-Path -LiteralPath $statePath -PathType Leaf) {
+              try {
+                $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+                $token = (Get-Content -LiteralPath (
+                  Join-Path $testRoot '.system_generated\local_token'
+                ) -Raw).Trim()
+                $request = [Net.HttpWebRequest]::Create(
+                  'http://127.0.0.1:8000/api/shutdown'
+                )
+                $request.Proxy = $null
+                $request.KeepAlive = $false
+                $request.Timeout = 2000
+                $request.Method = 'POST'
+                $request.Headers.Add('X-Local-Token', $token)
+                $request.Headers.Add('X-MathBank-Launch-ID', [string]$state.launch_id)
+                $request.ContentLength = 0
+                $shutdownResponse = $request.GetResponse()
+                $shutdownResponse.Close()
+                for ($attempt = 0; $attempt -lt 20; $attempt++) {
+                  Start-Sleep -Milliseconds 250
+                  if ($null -eq (Get-Process -Id ([int]$state.pid) -ErrorAction SilentlyContinue)) {
+                    break
+                  }
+                }
+                if ($null -ne (Get-Process -Id ([int]$state.pid) -ErrorAction SilentlyContinue)) {
+                  throw 'The restarted service did not exit cooperatively during cleanup.'
+                }
+              }
+              catch {
+                Write-Error "Cooperative CI cleanup failed: $($_.Exception.Message)"
+              }
+            }
+            Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+          }
+      - name: Parse macOS launcher
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash -n '启动题库系统.command'

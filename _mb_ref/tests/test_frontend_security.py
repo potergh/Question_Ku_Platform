@@ -1,0 +1,1263 @@
+from pathlib import Path
+import shutil
+import subprocess
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+STATIC_DIR = PROJECT_ROOT / "static"
+STATIC_JS_DIR = STATIC_DIR / "js"
+
+
+def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def test_cascade_loads_shared_safety_boundary_before_feature_modules():
+    index_source = _read(STATIC_DIR / "index.html")
+    expected_order = (
+        "/static/js/api.js",
+        "/static/js/editor.js",
+        "/static/js/ocr.js",
+        "/static/js/import.js",
+        "/static/js/paper.js",
+    )
+
+    positions = [index_source.index(script_path) for script_path in expected_order]
+    assert positions == sorted(positions)
+    assert index_source.index("/static/lib/dompurify/purify.min.js") < positions[0]
+
+
+def test_untrusted_html_uses_dompurify_and_local_image_allowlist():
+    api_source = _read(STATIC_JS_DIR / "api.js")
+    editor_source = _read(STATIC_JS_DIR / "editor.js")
+    import_source = _read(STATIC_JS_DIR / "import.js")
+    paper_source = _read(STATIC_JS_DIR / "paper.js")
+
+    assert "window.MathBankSafe = MathBankSafe" in api_source
+    assert "window.DOMPurify.sanitize" in api_source
+    assert "ALLOWED_TAGS" in api_source
+    assert "ALLOWED_ATTR" in api_source
+    assert "decodedPath.startsWith('/static/uploads/')" in api_source
+    assert "url.origin !== window.location.origin" in api_source
+
+    assert "sanitizeRichHtml(preprocessFormulaForKaTeX(text, imageLayouts))" in editor_source
+    assert "MathBankSafe.safeImageUrl(src)" in editor_source
+    assert "MathBankSafe.safeImageUrl(m[1])" in paper_source
+    assert "window.parseMarkdownWithMath(html)" in paper_source
+    assert "MathBankSafe.sanitizeRichHtml(html)" in import_source
+    assert "MathBankSafe.escapeAttribute(rawModel)" in api_source
+    assert r"\.(?:png|jpe?g|gif|webp)$" in api_source
+    assert "return url.pathname;" in api_source
+    assert "return url.pathname + url.search;" not in api_source
+
+
+def test_plain_text_helpers_preserve_math_comparison_signs_in_real_js():
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+
+    api_source = _read(STATIC_JS_DIR / "api.js")
+    helper_start = api_source.index("const MathBankSafe = (() =>")
+    helper_end = api_source.index("window.MathBankSafe = MathBankSafe;", helper_start)
+    helper_source = api_source[helper_start:helper_end]
+    script = f"""
+const window = {{}};
+{helper_source}
+const raw = '$x<y$ and $y>z$ <not-a-tag>';
+if (MathBankSafe.sanitizePlainText(raw) !== raw) {{
+  throw new Error('plain-text sink changed mathematical comparison signs');
+}}
+const escaped = MathBankSafe.escapeText(raw);
+if (escaped !== '$x&lt;y$ and $y&gt;z$ &lt;not-a-tag&gt;') {{
+  throw new Error(`unexpected escaped text: ${{escaped}}`);
+}}
+"""
+
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_category_refresh_only_reloads_editor_when_explicitly_requested():
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+
+    api_source = _read(STATIC_JS_DIR / "api.js")
+    helper_start = api_source.index("function loadCategories(options = {})")
+    helper_end = api_source.index("// Populate Metadata Select Option Lists", helper_start)
+    helper_source = api_source[helper_start:helper_end]
+    assert "backupEditorState" not in helper_source
+    script = f"""
+const window = {{}};
+let systemMetadata = {{}};
+let categoryTree = {{}};
+let reloads = 0;
+window.reloadCurrentQuestionSilently = () => {{ reloads += 1; }};
+const EditorState = {{ questionId: 7 }};
+function populateMetadataDropdowns() {{}}
+function populateCategoryDropdowns() {{}}
+function populateFilterDropdowns() {{}}
+function showToast() {{}}
+function fetch(url) {{
+  const data = url.endsWith('/metadata')
+    ? {{ question_types: [], difficulties: [], curriculum: {{}} }}
+    : {{ high_school: {{}} }};
+  return Promise.resolve({{ ok: true, json: () => Promise.resolve(data) }});
+}}
+{helper_source}
+(async () => {{
+  await loadCategories();
+  if (reloads !== 0) throw new Error('ordinary metadata refresh reloaded the editor');
+  await loadCategories({{ reloadCurrentQuestion: true }});
+  if (reloads !== 1) throw new Error('explicit curriculum refresh did not reload the editor');
+}})().catch(error => {{ console.error(error); process.exitCode = 1; }});
+"""
+
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_explicit_settings_refresh_preserves_dirty_editor_in_real_js():
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+
+    import_source = _read(STATIC_JS_DIR / "import.js")
+    helper_start = import_source.index("window.reloadCurrentQuestionSilently = function()")
+    helper_end = import_source.index("// Save/Update Question", helper_start)
+    helper_source = import_source[helper_start:helper_end]
+    api_source = _read(STATIC_JS_DIR / "api.js")
+    assert "loadCategories({ reloadCurrentQuestion: true })" in api_source
+
+    script = f"""
+const window = {{}};
+const EditorState = {{ questionId: 17, seqNum: 4, createdAt: '2026-01-01' }};
+let dirty = true;
+let selections = 0;
+const toasts = [];
+window.isEditorModified = () => dirty;
+function selectQuestion(question) {{
+  if (question.id !== 17) throw new Error('wrong question identity');
+  selections += 1;
+}}
+function showToast(message, type) {{ toasts.push([message, type]); }}
+{helper_source}
+
+if (window.reloadCurrentQuestionSilently() !== false) {{
+  throw new Error('dirty editor claimed to reload');
+}}
+if (selections !== 0) throw new Error('settings refresh overwrote dirty editor');
+if (toasts.length !== 1 || toasts[0][1] !== 'info') {{
+  throw new Error('dirty refresh did not explain that content was preserved');
+}}
+
+dirty = false;
+if (window.reloadCurrentQuestionSilently() !== true || selections !== 1) {{
+  throw new Error('clean editor no longer receives explicit curriculum refresh');
+}}
+"""
+
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_ai_solve_is_bound_to_editor_generation_and_controller_in_real_js():
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+
+    api_source = _read(STATIC_JS_DIR / "api.js")
+    editor_start = api_source.index("const EditorState = (() =>")
+    editor_end = api_source.index("window.EditorState = EditorState;", editor_start)
+    editor_source = api_source[editor_start:editor_end]
+
+    ocr_source = _read(STATIC_JS_DIR / "ocr.js")
+    helper_start = ocr_source.index("let aiSolveRequestSequence = 0")
+    helper_end = ocr_source.index("// Global Esc key listener", helper_start)
+    helper_source = ocr_source[helper_start:helper_end]
+    solve_start = ocr_source.index("function triggerAISolve()")
+    solve_end = ocr_source.index("// Import Tab results", solve_start)
+    solve_source = ocr_source[solve_start:solve_end]
+
+    assert "const editorSnapshot = EditorState.snapshot()" in solve_source
+    assert "const requestSequence = ++aiSolveRequestSequence" in solve_source
+    assert "controller === aiSolveAbortController" in helper_source
+    assert "aiSolveCompletionTimer = setTimeout" in solve_source
+    completion_start = solve_source.index("aiSolveCompletionTimer = setTimeout")
+    assert "if (!requestIsCurrent()) return;" in solve_source[completion_start:]
+    catch_start = solve_source.index(".catch(err =>")
+    assert "if (!requestIsCurrent()) return;" in solve_source[catch_start:]
+
+    script = f"""
+const window = {{}};
+const document = {{ getElementById() {{ return null; }} }};
+let contentOcrAbortController = null;
+let answerOcrAbortController = null;
+let aiSolveAbortController = null;
+function clearContentOcrPreview() {{}}
+function clearOcrPreview() {{}}
+function showToast() {{}}
+{editor_source}
+{helper_source}
+
+EditorState.reset();
+const oldSnapshot = EditorState.snapshot();
+const oldController = new AbortController();
+const oldSequence = ++aiSolveRequestSequence;
+aiSolveAbortController = oldController;
+if (!isAiSolveRequestCurrent(oldSequence, oldController, oldSnapshot)) {{
+  throw new Error('new AI request was not current');
+}}
+
+EditorState.useQuestion({{ id: 22, seq_num: 3 }});
+if (!oldController.signal.aborted) throw new Error('question switch did not abort AI request');
+if (isAiSolveRequestCurrent(oldSequence, oldController, oldSnapshot)) {{
+  throw new Error('old AI request survived editor generation change');
+}}
+
+const newSnapshot = EditorState.snapshot();
+const newController = new AbortController();
+const newSequence = ++aiSolveRequestSequence;
+aiSolveAbortController = newController;
+if (!isAiSolveRequestCurrent(newSequence, newController, newSnapshot)) {{
+  throw new Error('replacement AI request was not current');
+}}
+if (isAiSolveRequestCurrent(oldSequence, oldController, oldSnapshot)) {{
+  throw new Error('old callback could take ownership from replacement request');
+}}
+"""
+
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_editor_transition_aborts_content_and_answer_ocr_in_real_js():
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+
+    api_source = _read(STATIC_JS_DIR / "api.js")
+    state_start = api_source.index("const EditorState = (() => {")
+    state_end = api_source.index("window.EditorState = EditorState;", state_start)
+    state_source = api_source[state_start:state_end]
+
+    ocr_source = _read(STATIC_JS_DIR / "ocr.js")
+    cancel_start = ocr_source.index("let aiSolveRequestSequence = 0;")
+    cancel_end = ocr_source.index("// Global Esc key listener", cancel_start)
+    cancel_source = ocr_source[cancel_start:cancel_end]
+
+    script = f"""
+const window = {{}};
+const document = {{ getElementById: () => null }};
+let contentAborts = 0;
+let answerAborts = 0;
+let idleClears = 0;
+let toasts = 0;
+let contentOcrAbortController = {{ abort: () => {{ contentAborts += 1; }} }};
+let answerOcrAbortController = {{ abort: () => {{ answerAborts += 1; }} }};
+let aiSolveAbortController = null;
+function clearContentOcrPreview() {{ idleClears += 1; }}
+function clearOcrPreview() {{ idleClears += 1; }}
+function showToast() {{ toasts += 1; }}
+{state_source}
+{cancel_source}
+
+EditorState.beginTransition();
+if (contentAborts !== 1 || answerAborts !== 1) {{
+  throw new Error('editor transition left an OCR request attached to the old question');
+}}
+if (contentOcrAbortController !== null || answerOcrAbortController !== null) {{
+  throw new Error('aborted OCR controller was not released');
+}}
+const feedbackAfterAbort = toasts;
+EditorState.beginTransition();
+if (idleClears !== 0 || toasts !== feedbackAfterAbort) {{
+  throw new Error('an idle editor transition cleared OCR UI or emitted a false toast');
+}}
+"""
+
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_editor_bound_uploads_reject_old_sessions_in_real_js():
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+
+    ocr_source = _read(STATIC_JS_DIR / "ocr.js")
+    content_upload_start = ocr_source.index("function uploadIllustration(file)")
+    content_upload_end = ocr_source.index("function insertImageTag", content_upload_start)
+    answer_upload_start = ocr_source.index("function uploadAnswerImage(file)")
+    answer_upload_end = ocr_source.index("function insertAnswerImageTag", answer_upload_start)
+    upload_source = (
+        ocr_source[content_upload_start:content_upload_end]
+        + ocr_source[answer_upload_start:answer_upload_end]
+    )
+
+    script = f"""
+let generation = 1;
+const EditorState = {{
+  snapshot: () => ({{ generation }}),
+  isCurrent: session => session.generation === generation
+}};
+class FormData {{ append() {{}} }}
+let fetchResolvers = [];
+function fetch() {{
+  return new Promise(resolve => {{ fetchResolvers.push(resolve); }});
+}}
+let insertedContent = 0;
+let insertedAnswer = 0;
+let uploadedImages = [];
+function insertImageTag() {{ insertedContent += 1; }}
+function insertAnswerImageTag() {{ insertedAnswer += 1; }}
+function renderIllustrationBadges() {{}}
+function showToast() {{}}
+{upload_source}
+
+(async () => {{
+  uploadIllustration({{ type: 'image/png' }});
+  uploadAnswerImage({{ type: 'image/png' }});
+  generation = 2;
+  for (const resolve of fetchResolvers) {{
+    resolve({{ json: () => Promise.resolve({{ status: 'success', file_path: '/static/uploads/old.png' }}) }});
+  }}
+  await new Promise(resolve => setTimeout(resolve, 0));
+  if (insertedContent || insertedAnswer || uploadedImages.length) {{
+    throw new Error('old upload response wrote into the replacement editor session');
+  }}
+}})().catch(error => {{ console.error(error); process.exitCode = 1; }});
+"""
+
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_delayed_tikz_auto_compile_rejects_old_editor_session_in_real_js():
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+
+    import_source = _read(STATIC_JS_DIR / "import.js")
+    helper_start = import_source.index("window.extractTikzCodeFromTextarea = function(")
+    helper_end = import_source.index("\n        });\n\n        // 单题一键补全", helper_start)
+    helper_source = import_source[helper_start:helper_end]
+
+    script = f"""
+let generation = 1;
+const EditorState = {{
+  snapshot: () => ({{ generation }}),
+  isCurrent: session => session.generation === generation
+}};
+let delayedCallback = null;
+function setTimeout(callback) {{ delayedCallback = callback; }}
+function showToast() {{}}
+class Event {{}}
+let compileCalls = 0;
+let openCalls = 0;
+const textarea = {{
+  value: '\\\\begin{{tikzpicture}}\\\\draw (0,0)--(1,1);\\\\end{{tikzpicture}}',
+  dispatchEvent() {{}}
+}};
+const workbenchCode = {{ value: '' }};
+const document = {{
+  getElementById(id) {{
+    if (id === 'editContent') return textarea;
+    if (id === 'answerTikzWorkbenchCode') return workbenchCode;
+    return null;
+  }}
+}};
+const window = {{
+  openTikzWorkbench() {{ openCalls += 1; }},
+  compileTikzWorkbench() {{ compileCalls += 1; }}
+}};
+{helper_source}
+
+window.extractTikzCodeFromTextarea('editContent');
+if (!delayedCallback) throw new Error('TikZ auto compile was not scheduled');
+generation = 2;
+delayedCallback();
+if (compileCalls !== 0 || openCalls !== 0) {{
+  throw new Error('old TikZ timer acted on the replacement editor session');
+}}
+
+textarea.value = '\\\\begin{{tikzpicture}}\\\\draw (0,0)--(2,2);\\\\end{{tikzpicture}}';
+window.extractTikzCodeFromTextarea('editContent');
+delayedCallback();
+if (compileCalls !== 1 || openCalls !== 1 || !workbenchCode.value.includes('tikzpicture')) {{
+  throw new Error('current TikZ timer no longer opens and compiles in the shared workbench');
+}}
+"""
+
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_failed_tikz_generation_keeps_selected_reference_for_retry_in_real_js():
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+
+    import_source = _read(STATIC_JS_DIR / "import.js")
+    state_start = import_source.index("const tikzWorkbenchState = {")
+    state_end = import_source.index("function setTikzWorkbenchStatus", state_start)
+    state_source = import_source[state_start:state_end]
+    generate_start = import_source.index("window.generateTikzWithAI = async function()")
+    generate_end = import_source.index(
+        "window.compileTikzWorkbench = async function()", generate_start
+    )
+    generate_source = import_source[generate_start:generate_end]
+
+    script = f"""
+const window = {{}};
+{state_source}
+const selectedReference = {{ name: 'reference.png', type: 'image/png' }};
+tikzWorkbenchState.referenceFile = selectedReference;
+const instruction = {{ value: '按图重绘' }};
+const code = {{ value: '' }};
+const document = {{
+  getElementById(id) {{
+    if (id === 'answerTikzInstruction') return instruction;
+    if (id === 'answerTikzWorkbenchCode') return code;
+    return null;
+  }}
+}};
+class FormData {{
+  constructor() {{ this.items = []; submitted.push(this); }}
+  append(key, value) {{ this.items.push([key, value]); }}
+}}
+const submitted = [];
+async function fetch() {{
+  return {{ ok: false, json: async () => ({{ detail: 'simulated failure' }}) }};
+}}
+function tikzContextText() {{ return '题干'; }}
+function setTikzWorkbenchBusy() {{}}
+function setTikzWorkbenchStatus() {{}}
+function setTikzReferencePath() {{ throw new Error('failure must not replace the local file'); }}
+async function renderTikzWorkbenchCode() {{ throw new Error('failure must not compile'); }}
+function showToast() {{}}
+const EditorState = {{ isCurrent: () => true }};
+{generate_source}
+
+(async () => {{
+  await window.generateTikzWithAI();
+  await window.generateTikzWithAI();
+  if (tikzWorkbenchState.referenceFile !== selectedReference) {{
+    throw new Error('failed generation discarded the selected reference');
+  }}
+  if (submitted.length !== 2) throw new Error('retry did not submit a second request');
+  for (const form of submitted) {{
+    const reference = form.items.find(([key]) => key === 'reference_image');
+    if (!reference || reference[1] !== selectedReference) {{
+      throw new Error('retry did not reuse the selected reference file');
+    }}
+  }}
+}})().catch(error => {{ console.error(error); process.exitCode = 1; }});
+"""
+
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_import_answer_generation_rejects_replaced_question_set_in_real_js():
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+
+    import_source = _read(STATIC_JS_DIR / "import.js")
+    helpers_start = import_source.index("function replaceParsedQuestions(nextQuestions)")
+    helpers_end = import_source.index("function blockImportResetWhileSaving()", helpers_start)
+    helpers_source = import_source[helpers_start:helpers_end]
+    answer_start = import_source.index("async function generateSingleAnswer(index)")
+    answer_end = import_source.index("window.generateSingleAnswer = generateSingleAnswer", answer_start)
+    answer_source = import_source[answer_start:answer_end]
+
+    script = f"""
+const window = {{}};
+let parsedQuestionsData = [];
+let parsedQuestionsGeneration = 0;
+const pendingFetches = [];
+const requests = [];
+const systemPreferSolveModel = "ZHONGZHAN_GPT/gpt-5:high";
+function fetch(url, options) {{
+  requests.push(options.body.values);
+  return new Promise(resolve => pendingFetches.push(resolve));
+}}
+class FormData {{ constructor() {{ this.values = {{}}; }} append(k, v) {{ this.values[k] = v; }} }}
+const localStorage = {{ getItem() {{ return ''; }} }};
+const logs = [];
+const toasts = [];
+function appendImportLog(message) {{ logs.push(message); }}
+function showToast(message) {{ toasts.push(message); }}
+function renderParsedCardPreview() {{}}
+function invalidateParsedDuplicateCheck() {{}}
+function makeCard() {{
+  const button = {{ disabled: false, innerHTML: '' }};
+  const answer = {{ value: '' }};
+  const preview = {{ innerHTML: '' }};
+  return {{
+    button,
+    answer,
+    querySelector(selector) {{
+      if (selector === '.card-solve-btn') return button;
+      if (selector === '.card-answer-textarea') return answer;
+      if (selector === '.card-answer-preview') return preview;
+      return null;
+    }}
+  }};
+}}
+let activeCard = null;
+const document = {{ getElementById() {{ return activeCard; }} }};
+{helpers_source}
+{answer_source}
+
+(async () => {{
+  const oldQuestion = {{ content: 'old', answer_markdown: '' }};
+  const newQuestion = {{ content: 'new', answer_markdown: '' }};
+  const oldCard = makeCard();
+  const newCard = makeCard();
+
+  replaceParsedQuestions([oldQuestion]);
+  activeCard = oldCard;
+  const staleSingle = generateSingleAnswer(0);
+  replaceParsedQuestions([newQuestion]);
+  activeCard = newCard;
+  pendingFetches.shift()({{
+    ok: true,
+    json: () => Promise.resolve({{ status: 'success', solution: 'stale answer' }})
+  }});
+  await staleSingle;
+  if (oldQuestion.answer_markdown || newQuestion.answer_markdown || toasts.length) {{
+    throw new Error('stale single-answer callback changed a replaced import session');
+  }}
+
+  const currentSingle = generateSingleAnswer(0);
+  pendingFetches.shift()({{
+    ok: true,
+    json: () => Promise.resolve({{ status: 'success', solution: 'current answer' }})
+  }});
+  await currentSingle;
+  if (newQuestion.answer_markdown !== 'current answer' || newCard.button.disabled) {{
+    throw new Error('current single-answer request did not finish normally');
+  }}
+
+  const oldBatchQuestion = {{ content: 'old batch', answer_markdown: '' }};
+  const replacement = {{ content: 'replacement', answer_markdown: '' }};
+  const batchGeneration = replaceParsedQuestions([oldBatchQuestion]);
+  activeCard = null;
+  const staleBatch = processAsyncAnswerGeneration(parsedQuestionsData, batchGeneration);
+  replaceParsedQuestions([replacement]);
+  pendingFetches.shift()({{
+    ok: true,
+    json: () => Promise.resolve({{ status: 'success', solution: 'stale batch answer' }})
+  }});
+  await staleBatch;
+  if (oldBatchQuestion.answer_markdown || replacement.answer_markdown) {{
+    throw new Error('stale answer queue changed a replaced import session');
+  }}
+  if (logs.some(message => message.includes('全部完成'))) {{
+    throw new Error('stale answer queue announced completion in the new session');
+  }}
+  replaceParsedQuestions([
+    {{ content: 'original', answer_markdown: 'A' }},
+    {{ content: 'numeric', answer_markdown: '2' }},
+    {{ content: 'missing', answer_markdown: '' }}
+  ]);
+  const batch = processAsyncAnswerGeneration(parsedQuestionsData);
+  if (pendingFetches.length !== 1) throw new Error('original short answers were regenerated');
+  pendingFetches.shift()({{ ok: false, status: 502 }});
+  await batch;
+  if (!logs.some(message => message.includes('成功 0 题，失败 1 题'))) {{
+    throw new Error('failed batch was reported as successful');
+  }}
+  replaceParsedQuestions(Array.from({{ length: 4 }}, (_, i) => ({{ content: `q${{i}}`, answer_markdown: '' }})));
+  const successfulBatch = processAsyncAnswerGeneration(parsedQuestionsData);
+  if (pendingFetches.length !== 3) throw new Error('answer queue exceeded concurrency limit');
+  for (let i = 0; i < 4; i++) {{
+    pendingFetches.shift()({{ ok: true, json: async () => ({{ status: 'success', solution: 'solved' }}) }});
+    await new Promise(resolve => setImmediate(resolve));
+  }}
+  await successfulBatch;
+  if (parsedQuestionsData.some(q => q.answer_markdown !== 'solved')) throw new Error('queue did not solve all missing answers');
+  if (!logs.some(message => message.includes('成功 4 题，失败 0 题'))) throw new Error('incorrect successful batch summary');
+  if (requests.some(request => request.model !== systemPreferSolveModel || request.thinking !== 'disabled')) {{
+    throw new Error('import requests ignored configured solve settings');
+  }}
+}})().catch(error => {{ console.error(error); process.exitCode = 1; }});
+"""
+
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_document_poll_generation_rejects_old_terminal_callbacks_in_real_js():
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+
+    import_source = _read(STATIC_JS_DIR / "import.js")
+    helper_start = import_source.index("let documentImportTaskGeneration = 0")
+    helper_end = import_source.index("function cancelCurrentImportTask()", helper_start)
+    helper_source = import_source[helper_start:helper_end]
+    poll_start = import_source.index("function pollPdfTaskStatus(")
+    poll_end = import_source.index("function renderImagesList()", poll_start)
+    poll_source = import_source[poll_start:poll_end]
+    latex_start = import_source.index("// Normal LaTeX branch")
+    latex_end = import_source.index("let documentImportTaskGeneration = 0", latex_start)
+    latex_source = import_source[latex_start:latex_end]
+
+    assert "if (!isCurrentDocumentPoll(identity)) return;" in poll_source
+    assert "if (!finishDocumentPoll(identity)) return;" in poll_source
+    assert "pollPdfTaskStatus(taskId, importTaskGeneration)" in import_source
+    assert import_source.count("if (!isCurrentDocumentImportTask(importTaskGeneration)) return;") >= 4
+    assert latex_source.count(
+        "if (!isCurrentDocumentImportTask(importTaskGeneration)) return null;"
+    ) == 2
+    assert "if (!isCurrentDocumentImportTask(importTaskGeneration) || !r) return null;" in latex_source
+    assert "if (!isCurrentDocumentImportTask(importTaskGeneration) || !data) return;" in latex_source
+    assert "processAsyncAnswerGeneration(parsedQuestionsData, parsedQuestionsGeneration)" in latex_source
+
+    script = f"""
+const window = {{ currentPdfTaskId: null }};
+{helper_source}
+
+const oldGeneration = beginDocumentImportTask();
+const oldIdentity = {{ generation: oldGeneration, taskId: 'old', intervalId: 1 }};
+activeDocumentPoll = oldIdentity;
+window.currentPdfTaskId = oldIdentity.taskId;
+if (!isCurrentDocumentPoll(oldIdentity)) throw new Error('old poll never became current');
+
+const newGeneration = beginDocumentImportTask();
+const newIdentity = {{ generation: newGeneration, taskId: 'new', intervalId: 2 }};
+activeDocumentPoll = newIdentity;
+window.currentPdfTaskId = newIdentity.taskId;
+if (finishDocumentPoll(oldIdentity)) throw new Error('old terminal callback finished the new poll');
+if (activeDocumentPoll !== newIdentity) {{
+  throw new Error('old callback cleared replacement poll state');
+}}
+if (!finishDocumentPoll(newIdentity)) throw new Error('current terminal callback was rejected');
+"""
+
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_ai_import_values_cannot_break_out_of_attributes_or_textareas():
+    import_source = _read(STATIC_JS_DIR / "import.js")
+    editor_source = _read(STATIC_JS_DIR / "editor.js")
+
+    assert 'value="${q.source || \'\'}"' not in import_source
+    assert ">${q.content || ''}</textarea>" not in import_source
+    assert ">${q.answer_markdown || ''}</textarea>" not in import_source
+    assert "card.querySelector('.card-source').value" in import_source
+    assert "card.querySelector('.card-content-textarea').value" in import_source
+    assert "card.querySelector('.card-answer-textarea').value" in import_source
+    assert "window.syncAnswerImagesFromMarkdown = function()" in import_source
+    assert "window.renderAnswerImageBadges = function()" in import_source
+
+    assert "onclick=\"window.open('${src}'" not in editor_source
+    assert "onclick=\"window.open('${p}'" not in import_source
+    assert 'data-safe-image-open="true"' in editor_source
+    assert 'data-safe-image-open="true"' in import_source
+
+
+def test_fetch_token_is_limited_to_same_origin_api_writes_and_supports_request():
+    api_source = _read(STATIC_JS_DIR / "api.js")
+
+    assert "input instanceof Request" in api_source
+    assert "input.method" in api_source
+    assert "input.headers" in api_source
+    assert "requestUrl.origin === window.location.origin" in api_source
+    assert "requestUrl.pathname.startsWith('/api/')" in api_source
+    assert "isSameOriginApi && isWriteRequest" in api_source
+    assert "new Headers(requestInit.headers || undefined)" in api_source
+
+
+def test_question_selection_and_save_are_transactional():
+    import_source = _read(STATIC_JS_DIR / "import.js")
+    editor_source = _read(STATIC_JS_DIR / "editor.js")
+    select_start = import_source.index("function selectQuestion(item, options = {})")
+    select_end = import_source.index("window.reloadCurrentQuestionSilently", select_start)
+    select_source = import_source[select_start:select_end]
+    save_start = import_source.index("function saveQuestion(skipCheck = false)")
+    save_end = import_source.index("// AI classification modal handlers", save_start)
+    save_source = import_source[save_start:save_end]
+
+    assert "EditorState.useQuestion(item)" not in select_source
+    assert select_source.index(".then(async fullItem =>") < select_source.index("EditorState.useQuestion(fullItem)")
+    assert "questionDetailLoading = true" in select_source
+    assert "questionDetailLoading = false" in select_source
+    assert "loadSequence !== questionDetailLoadSequence" in select_source
+    assert "Number(fullItem.id) !== requestedQuestionId" in select_source
+    assert "invalidatePendingQuestionDetailLoad" in editor_source
+
+    assert "let saveQuestionInFlight = null" in import_source
+    assert "if (saveQuestionInFlight)" in import_source
+    assert "return saveQuestionInFlight" in import_source
+    assert "saveQuestionInFlight = saveOperation.finally" in import_source
+    assert "button.disabled = isBusy" in import_source
+    assert "const requestBackupSnapshot = Object.freeze" in save_source
+    assert "EditorState.isCurrent(editorSession)" in save_source
+    assert "window.editorMatchesBackupSnapshot(requestBackupSnapshot)" in save_source
+    assert "backupEditorState(data.question.id, null, requestBackupSnapshot)" in save_source
+    assert "EditorState.useQuestion(data.question)" in save_source
+    assert "selectQuestion(data.question" not in save_source
+    assert "window.isQuestionSaveInFlight" in import_source
+    assert "window.isQuestionSaveInFlight && window.isQuestionSaveInFlight()" in editor_source
+
+    for name in ("api.js", "editor.js", "ocr.js", "import.js", "paper.js"):
+        assert "new Promise(async" not in _read(STATIC_JS_DIR / name)
+
+
+def test_request_snapshot_keeps_post_submit_edits_dirty_in_real_js():
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+
+    editor_source = _read(STATIC_JS_DIR / "editor.js")
+    helper_start = editor_source.index("function backupEditorState")
+    helper_end = editor_source.index("// Custom Premium Confirmation Modal", helper_start)
+    helper_source = editor_source[helper_start:helper_end]
+    script = f"""
+const window = {{}};
+let originalQuestionState = null;
+let uploadedImages = ['/static/uploads/saved.png'];
+const TikzState = {{ contentAssets: [], answerAssets: [] }};
+const EditorState = {{ questionId: 17 }};
+const FigureLayoutState = {{
+  align: 'right',
+  size: 'auto',
+  customAlign: false,
+  setAlign(value) {{ this.align = value; }},
+  setSize(value) {{ this.size = value; }},
+  setCustomAlign(value) {{ this.customAlign = Boolean(value); }},
+  snapshot() {{
+    return {{
+      figure_align: this.align,
+      figure_size: this.size,
+      figure_align_custom: this.customAlign
+    }};
+  }}
+}};
+window.EditorState = EditorState;
+window.FigureLayoutState = FigureLayoutState;
+const values = {{
+  editContent: 'request payload',
+  editAnswerMarkdown: 'saved answer',
+  editReview: 'saved review',
+  editQType: 'single_choice',
+  editDifficulty: 'easy_error',
+  editSource: 'saved source',
+  editCompulsory: 'high_school',
+  editChapter: 'chapter 1',
+  editKnowledge: 'section 1',
+  editRelatedQuestion: '',
+  editTags: 'saved tag'
+}};
+const elements = Object.fromEntries(
+  Object.entries(values).map(([id, value]) => [id, {{ value }}])
+);
+const document = {{
+  getElementById(id) {{ return elements[id] || null; }}
+}};
+{helper_source}
+const requestSnapshot = Object.freeze({{
+  content: 'request payload',
+  answer_markdown: 'saved answer',
+  review: 'saved review',
+  question_type: 'single_choice',
+  difficulty: 'easy_error',
+  source: 'saved source',
+  category_compulsory: 'high_school',
+  category_chapter: 'chapter 1',
+  category_knowledge: 'section 1',
+  related_question_id: '',
+  image_paths: JSON.stringify(['/static/uploads/saved.png']),
+  tags: 'saved tag'
+}});
+
+backupEditorState(17, null, requestSnapshot);
+if (isEditorModified()) throw new Error('saved request snapshot should be clean');
+elements.editContent.value = 'request payload plus later input';
+if (!isEditorModified()) throw new Error('post-submit input was incorrectly marked saved');
+elements.editContent.value = 'request payload';
+if (isEditorModified()) throw new Error('restoring request snapshot should clear dirty state');
+elements.editRelatedQuestion.value = '23';
+if (!isEditorModified()) throw new Error('post-submit related-question change was incorrectly marked saved');
+elements.editRelatedQuestion.value = '';
+if (isEditorModified()) throw new Error('restoring related-question snapshot should clear dirty state');
+
+// A detail GET may have restored the old clean layout while a paper-side
+// layout write was in flight. The confirmation should advance both state and
+// baseline instead of leaving a false dirty editor.
+if (!reconcileEditorFigureLayout(
+  17,
+  {{ figure_align: 'bottom_right', figure_size: 'large' }},
+  {{ figure_align: 'bottom_right', figure_size: 'large' }},
+  true
+)) throw new Error('current editor layout was not reconciled');
+if (FigureLayoutState.align !== 'bottom_right' || FigureLayoutState.size !== 'large') {{
+  throw new Error('clean stale detail layout did not advance to the confirmed value');
+}}
+if (isEditorModified()) throw new Error('confirmed layout left a false dirty editor');
+
+// A newer editor-only choice must remain visible while only the persisted
+// baseline advances to the server-confirmed paper value.
+FigureLayoutState.setAlign('center');
+FigureLayoutState.setSize('medium');
+reconcileEditorFigureLayout(
+  17,
+  {{ figure_align: 'right', figure_size: 'small' }},
+  {{ figure_align: 'bottom_right', figure_size: 'large' }},
+  true
+);
+if (FigureLayoutState.align !== 'center' || FigureLayoutState.size !== 'medium') {{
+  throw new Error('newer editor-only layout was overwritten');
+}}
+if (!isEditorModified()) throw new Error('newer editor-only layout was incorrectly marked saved');
+"""
+
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_clear_and_session_reset_entries_block_while_save_is_in_flight():
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+
+    import_source = _read(STATIC_JS_DIR / "import.js")
+    editor_source = _read(STATIC_JS_DIR / "editor.js")
+    guard_start = import_source.index("function blockEditorSessionChangeWhileSaving()")
+    guard_end = import_source.index("window.isQuestionSaveInFlight", guard_start)
+    guard_source = import_source[guard_start:guard_end]
+    clear_start = import_source.index("function clearEditor()")
+    clear_end = import_source.index("function startNewQuestion()", clear_start)
+    clear_source = import_source[clear_start:clear_end]
+
+    guard_call = (
+        "window.blockEditorSessionChangeWhileSaving && "
+        "window.blockEditorSessionChangeWhileSaving()"
+    )
+    assert clear_source.index(guard_call) < clear_source.index("confirm(")
+    assert clear_source.index(guard_call) < clear_source.index("EditorState.reset()")
+
+    guarded_import_functions = (
+        ("function startNewQuestionWithoutPrompt()", "function switchSidebarTab", "EditorState.reset()"),
+        ("function startNewQuestion()", "function refreshRelatedDropdown", "EditorState.reset()"),
+    )
+    for start_marker, end_marker, mutation_marker in guarded_import_functions:
+        start = import_source.index(start_marker)
+        end = import_source.index(end_marker, start)
+        function_source = import_source[start:end]
+        assert guard_call in function_source
+        assert function_source.index(guard_call) < function_source.index(mutation_marker)
+
+    guarded_editor_functions = (
+        ("function saveCurrentToDrafts()", "function selectDraft", "EditorState.setDraftId"),
+        ("function selectDraft(draft)", "function deleteDraft", "EditorState.useDraft"),
+        ("function deleteDraft(id)", "function openStatsModal", "EditorState.clearDraft"),
+    )
+    for start_marker, end_marker, mutation_marker in guarded_editor_functions:
+        start = editor_source.index(start_marker)
+        end = editor_source.index(end_marker, start)
+        function_source = editor_source[start:end]
+        assert guard_call in function_source
+        assert function_source.index(guard_call) < function_source.index(mutation_marker)
+
+    script = f"""
+let saveQuestionInFlight = Promise.resolve(true);
+const window = {{}};
+const messages = [];
+let confirmCalls = 0;
+function showToast(message, type) {{ messages.push([message, type]); }}
+function confirm() {{ confirmCalls += 1; return false; }}
+{guard_source}
+{clear_source}
+
+clearEditor();
+if (confirmCalls !== 0) throw new Error('clear confirmation ran during an active save');
+if (messages.length !== 1 || messages[0][1] !== 'info') {{
+  throw new Error('blocked clear did not provide visible feedback');
+}}
+
+saveQuestionInFlight = null;
+clearEditor();
+if (confirmCalls !== 1) throw new Error('clear stayed blocked after save settled');
+"""
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_parsed_question_imports_use_question_identity_and_generation():
+    import_source = _read(STATIC_JS_DIR / "import.js")
+    save_start = import_source.index("function saveParsedQuestion(index)")
+    save_end = import_source.index("function confirmClearAllParsed()", save_start)
+    save_source = import_source[save_start:save_end]
+
+    assert "const parsedQuestionSaveInFlight = new Map()" in import_source
+    assert "let parsedQuestionsGeneration = 0" in import_source
+    assert "parsedQuestionSaveInFlight.get(q)" in save_source
+    assert "if (existingSave) return existingSave" in save_source
+    assert "const saveGeneration = parsedQuestionsGeneration" in save_source
+    assert "isParsedQuestionSaveContextCurrent(saveGeneration, index, q)" in save_source
+    assert "parsedQuestionSaveInFlight.set(q, trackedSave)" in save_source
+    assert "parsedQuestionSaveInFlight.delete(q)" in save_source
+
+
+def test_shutdown_request_is_bound_to_the_rendered_server_instance():
+    api_source = _read(STATIC_JS_DIR / "api.js")
+    shutdown_start = api_source.index("function confirmShutdown()")
+    shutdown_end = api_source.index(
+        "// --- TIKU DATABASE STATISTICS PANEL CONTROLLERS ---",
+        shutdown_start,
+    )
+    shutdown_source = api_source[shutdown_start:shutdown_end]
+
+    assert "'/api/shutdown'" in shutdown_source
+    assert "'X-MathBank-Launch-ID'" in shutdown_source
+    assert "window.__serverInstanceId || ''" in shutdown_source
+    assert "if (!response.ok)" in shutdown_source
+    assert "overlay.remove()" in shutdown_source
+
+
+def test_duplicate_checks_are_click_triggered_snapshot_bound_and_explicitly_overridden():
+    import_source = _read(STATIC_JS_DIR / "import.js")
+
+    render_start = import_source.index("function renderParsedQuestionsList(questions)")
+    render_end = import_source.index("function setupCardCategoryLinkage", render_start)
+    render_source = import_source[render_start:render_end]
+    assert "precheckParsedQuestionDuplicates" not in render_source
+    assert "scheduleParsedDuplicatePrecheck" not in import_source
+
+    request_start = import_source.index("async function requestQuestionDuplicateCheck(items)")
+    request_end = import_source.index("function duplicateBatchMatchCount", request_start)
+    request_source = import_source[request_start:request_end]
+    assert "'/api/questions/check-duplicates'" in request_source
+    assert "JSON.stringify({ items: items, max_candidates: 5 })" in request_source
+    assert "'X-Local-Token'" in request_source
+    assert "signal: controller.signal" in request_source
+    assert "isValidationError" in request_source
+
+    item_start = import_source.index("function buildParsedQuestionDuplicateItem")
+    item_end = import_source.index("function buildEditorQuestionDuplicateItem", item_start)
+    item_source = import_source[item_start:item_end]
+    for marker in (
+        "client_key",
+        "content:",
+        "answer_markdown:",
+        "question_type:",
+        "image_paths:",
+        "content_tikz_assets:",
+        "answer_tikz_assets:",
+        "tikz_code:",
+        "exclude_id:",
+    ):
+        assert marker in item_source
+    assert "exclude_id: null" in item_source
+
+    single_start = import_source.index("function saveParsedQuestion(index)")
+    single_end = import_source.index("function confirmClearAllParsed()", single_start)
+    single_source = import_source[single_start:single_end]
+    assert "indices: [index]" in single_source
+    assert single_source.index("precheckParsedQuestionDuplicates") < single_source.index(
+        "fetch('/api/questions'"
+    )
+    assert "serializeQuestionDuplicateItem(currentItem) !== expectedLocalSnapshot" in single_source
+    assert "formData.append('duplicate_snapshot_hash'" in single_source
+    assert "formData.append('duplicate_override', 'independent')" in single_source
+    assert "formData.append('content_tikz_assets'" in single_source
+    assert "formData.append('answer_tikz_assets'" in single_source
+    assert "if (outcome.invalid) return false" in single_source
+
+    batch_start = import_source.index("function saveAllParsedQuestions()")
+    batch_end = import_source.index("// SIDEBAR QUESTION SOURCE", batch_start)
+    batch_source = import_source[batch_start:batch_end]
+    assert batch_source.index("precheckParsedQuestionDuplicates") < batch_source.index(
+        "runParsedSavePool"
+    )
+    assert "openParsedDuplicateReviewModal(" in batch_source
+    assert "duplicateDecisionResolved: true" in batch_source
+    assert "selectedIndices.length > 500" in batch_source
+    assert "independentOverrideIndices.has(index)" in batch_source
+    assert "if (outcome.invalid) return false" in batch_source
+    assert ", 3);" in batch_source
+    assert "selectedIndices.map(idx => saveParsedQuestion" not in batch_source
+
+
+def test_bounded_parsed_import_pool_never_exceeds_three_workers_in_real_js():
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+    import_source = _read(STATIC_JS_DIR / "import.js")
+    pool_start = import_source.index("async function runParsedSavePool")
+    pool_end = import_source.index("function saveAllParsedQuestions()", pool_start)
+    pool_source = import_source[pool_start:pool_end]
+
+    script = f"""
+{pool_source}
+let active = 0;
+let peak = 0;
+(async () => {{
+  const values = Array.from({{ length: 20 }}, (_, index) => index);
+  const results = await runParsedSavePool(values, async value => {{
+    active += 1;
+    peak = Math.max(peak, active);
+    await new Promise(resolve => setTimeout(resolve, 3));
+    active -= 1;
+    return value;
+  }}, 3);
+  if (peak > 3) throw new Error(`pool reached ${{peak}} concurrent workers`);
+  if (results.length !== values.length || results[19] !== 19) {{
+    throw new Error('pool lost result ordering or values');
+  }}
+}})().catch(error => {{ console.error(error); process.exitCode = 1; }});
+"""
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_shared_question_preview_pipeline_is_used_by_editor_and_duplicate_review():
+    editor_source = _read(STATIC_JS_DIR / "editor.js")
+    import_source = _read(STATIC_JS_DIR / "import.js")
+
+    helper_start = editor_source.index("function renderQuestionPreviewContent")
+    helper_end = editor_source.index(
+        "window.renderQuestionPreviewContent = renderQuestionPreviewContent;",
+        helper_start,
+    )
+    helper_source = editor_source[helper_start:helper_end]
+    parse_position = helper_source.index("preparedHtml = parseMarkdownWithMath(source, settings.imageLayouts || {})")
+    katex_position = helper_source.index("renderMathInElement(container")
+    choices_position = helper_source.index("adaptChoicesGridLayout(container)")
+    assert parse_position < katex_position < choices_position
+    assert "throwOnError: false" in helper_source
+    assert "settings.includeImages !== false" in helper_source
+    assert "typeof settings.preparedHtml === 'string'" in helper_source
+    assert "return preparedHtml" in helper_source
+    assert ".replace(/<img\\b[^>]*>/gi, '')" in helper_source
+    assert "window.renderQuestionPreviewContent = renderQuestionPreviewContent;" in editor_source
+
+    parse_start = editor_source.index("function parseMarkdownWithMath(text,")
+    parse_end = editor_source.index("window.parseMarkdownWithMath = parseMarkdownWithMath;", parse_start)
+    parse_source = editor_source[parse_start:parse_end]
+    assert "sanitizeRichHtml(preprocessFormulaForKaTeX(text, imageLayouts))" in parse_source
+
+    update_start = editor_source.index("const updateContentPreview = () =>")
+    update_end = editor_source.index("const updateAnswerPreview = () =>", update_start)
+    update_source = editor_source[update_start:update_end]
+    assert "const preparedHtml = renderQuestionPreviewContent(previewContainer, text, { imageLayouts: FigureLayoutState.imageLayouts })" in update_source
+    assert "renderQuestionPreviewContent(paperContainer, text, { preparedHtml: preparedHtml })" in update_source
+    assert "renderMathInElement(" not in update_source
+
+    scheduler_start = import_source.index("function resetParsedDuplicateCandidateRendering")
+    candidate_start = import_source.index("function appendDuplicateCandidate")
+    scheduler_source = import_source[scheduler_start:candidate_start]
+    candidate_end = import_source.index("function renderParsedDuplicateReview", candidate_start)
+    candidate_source = import_source[candidate_start:candidate_end]
+    review_start = import_source.index("function renderParsedDuplicateReview", candidate_end)
+    review_end = import_source.index("function openParsedDuplicateReviewModal", review_start)
+    review_source = import_source[review_start:review_end]
+
+    assert "sanitizePlainText" in candidate_source
+    assert candidate_source.count("window.renderQuestionPreviewContent(") == 1
+    assert "scheduleParsedDuplicateCandidateRender(" in candidate_source
+    assert "new window.IntersectionObserver" in scheduler_source
+    assert "parsedDuplicateCandidateObserver.disconnect()" in scheduler_source
+    assert "parsedDuplicateCandidateObserver.observe(container)" in scheduler_source
+    assert "window.requestAnimationFrame" in scheduler_source
+    assert "{ includeImages: false }" in scheduler_source
+    assert "container.setAttribute('aria-busy', 'false')" in scheduler_source
+    assert "{ includeImages: false }" in candidate_source
+    assert "renderedContent.setAttribute('aria-busy', 'true')" in candidate_source
+    assert review_source.index("prepareParsedDuplicateCandidateRendering(list)") < review_source.index(
+        "list.textContent = ''"
+    )
+    assert "renderMathInElement(" not in candidate_source
+    assert "content.textContent" not in candidate_source
+    assert "plainContent" not in candidate_source
+    assert "点击加载并渲染完整题干" in candidate_source
+    assert "fetch(`/api/questions/${Number(candidate.id)}`)" in candidate_source
+    assert "reasonText.textContent" in candidate_source
+    assert ".innerHTML" not in candidate_source
+    assert "(?<=" not in import_source
+    assert "(?<!" not in import_source
+
+
+def test_parsed_save_generation_prevents_index_reuse_and_stale_callback_in_real_js():
+    node = shutil.which("node")
+    assert node, "Node.js is required for the frontend executable regression"
+
+    import_source = _read(STATIC_JS_DIR / "import.js")
+    helpers_start = import_source.index("function replaceParsedQuestions(nextQuestions)")
+    helpers_end = import_source.index("function openImportModal()", helpers_start)
+    helpers_source = import_source[helpers_start:helpers_end]
+    save_start = import_source.index("function saveParsedQuestion(index)")
+    save_end = import_source.index("function confirmClearAllParsed()", save_start)
+    save_source = import_source[save_start:save_end]
+
+    for start_marker, end_marker, mutation_marker in (
+        ("function closeImportModal()", "// PDF & Crop Global States", "performOrphanedTempCropsCleanup"),
+        ("function clearAllImportInputs()", "function resetImportState", "batchSelectedImages = []"),
+        ("function resetImportState", "function appendSafeImageBadge", "replaceParsedQuestions([])"),
+        ("function confirmClearAllParsed()", "function clearAllParsedSources", "confirm("),
+    ):
+        start = import_source.index(start_marker)
+        end = import_source.index(end_marker, start)
+        function_source = import_source[start:end]
+        assert "blockImportResetWhileSaving()" in function_source
+        assert function_source.index("blockImportResetWhileSaving()") < function_source.index(mutation_marker)
+
+    script = f"""
+const window = {{ MathBankSafe: {{ safeImageUrl(value) {{ return value; }} }} }};
+let parsedQuestionsData = [];
+let parsedQuestionsGeneration = 0;
+const parsedQuestionSaveInFlight = new Map();
+let parsedBatchSaveInFlight = null;
+const toasts = [];
+function showToast(message, type) {{ toasts.push([message, type]); }}
+function loadCategories() {{}}
+function loadQuestions() {{}}
+function updateSelectedCount() {{}}
+function validateParsedQuestionBeforeImport() {{ return true; }}
+function safeDuplicateTikzAssets() {{ return []; }}
+function safePersistedTikzAssets() {{ return []; }}
+function buildParsedQuestionDuplicateItem() {{ return {{ image_paths: [] }}; }}
+class FormData {{ append() {{}} }}
+
+function createCard(content) {{
+  const fields = {{
+    '.card-content-textarea': {{ value: content }},
+    '.card-answer-textarea': {{ value: '' }},
+    '.card-qtype': {{ value: 'single_choice' }},
+    '.card-difficulty': {{ value: 'easy_error' }},
+    '.card-source': {{ value: '' }},
+    '.card-compulsory': {{ value: 'high_school' }},
+    '.card-chapter': {{ value: 'chapter_1' }},
+    '.card-knowledge': {{ value: 'section_1' }},
+    '.card-save-btn': {{ disabled: false, innerHTML: '', className: '' }},
+    '.card-status-badge': {{ textContent: '', className: '' }},
+    '.card-select-checkbox': {{
+      disabled: false,
+      checked: true,
+      classList: {{ add() {{}} }}
+    }}
+  }};
+  return {{ fields, querySelector(selector) {{ return fields[selector] || null; }} }};
+}}
+
+const pendingFetches = [];
+function fetch() {{
+  return new Promise(resolve => pendingFetches.push(resolve));
+}}
+let activeCard = null;
+const document = {{ getElementById() {{ return activeCard; }} }};
+{helpers_source}
+{save_source}
+
+(async () => {{
+  const oldQuestion = {{ content: 'old paper question', image_paths: [] }};
+  const newQuestion = {{ content: 'new paper question', image_paths: [] }};
+  const oldCard = createCard(oldQuestion.content);
+  const newCard = createCard(newQuestion.content);
+
+  replaceParsedQuestions([oldQuestion]);
+  activeCard = oldCard;
+  const oldSave = saveParsedQuestion(0);
+  const duplicateOldSave = saveParsedQuestion(0);
+  if (oldSave !== duplicateOldSave) throw new Error('same question did not reuse its in-flight promise');
+
+  replaceParsedQuestions([newQuestion]);
+  activeCard = newCard;
+  const newSave = saveParsedQuestion(0);
+  if (newSave === oldSave) throw new Error('new paper index 0 reused the old paper promise');
+
+  pendingFetches[0]({{ json() {{ return Promise.resolve({{ status: 'success' }}); }} }});
+  await oldSave;
+  if (oldQuestion.saved === true) throw new Error('stale callback mutated the old import session');
+  if (oldCard.fields['.card-status-badge'].textContent) {{
+    throw new Error('stale callback updated a detached card');
+  }}
+
+  pendingFetches[1]({{ json() {{ return Promise.resolve({{ status: 'success' }}); }} }});
+  await newSave;
+  if (newQuestion.saved !== true) throw new Error('current generation did not receive save success');
+  if (newCard.fields['.card-status-badge'].textContent !== '已导入') {{
+    throw new Error('current card did not receive save feedback');
+  }}
+  if (parsedQuestionSaveInFlight.size !== 0) throw new Error('in-flight identities leaked');
+}})().catch(error => {{ console.error(error); process.exitCode = 1; }});
+"""
+    result = subprocess.run(
+        [node, "-e", script],
+        cwd=PROJECT_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

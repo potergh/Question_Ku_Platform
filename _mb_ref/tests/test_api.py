@@ -1,0 +1,1008 @@
+import base64
+import os
+import json
+import signal
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+from main import LOCAL_TOKEN, SERVER_INSTANCE_ID
+from mathbank.database import Question
+
+def test_api_forbidden_without_token(client):
+    # Any POST/PUT/DELETE request without X-Local-Token must return 403 Forbidden
+    response = client.post("/api/settings/save", data={"deepseek_key": "test_key"})
+    assert response.status_code == 403
+    assert response.json()["status"] == "error"
+    assert "Forbidden" in response.json()["message"]
+
+
+def test_shutdown_rejects_a_different_server_instance(client):
+    response = client.post(
+        "/api/shutdown",
+        headers={
+            "X-Local-Token": LOCAL_TOKEN,
+            "X-MathBank-Launch-ID": "different-instance",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Server instance changed"
+
+
+def test_shutdown_requires_a_server_instance_header(client):
+    response = client.post(
+        "/api/shutdown",
+        headers={"X-Local-Token": LOCAL_TOKEN},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Server instance changed"
+
+
+def test_shutdown_accepts_current_instance_and_schedules_daemon_thread(client):
+    from main import _SHUTDOWN_SCHEDULED
+
+    _SHUTDOWN_SCHEDULED.clear()
+    try:
+        with patch("main.threading.Thread") as thread_class:
+            response = client.post(
+                "/api/shutdown",
+                headers={
+                    "X-Local-Token": LOCAL_TOKEN,
+                    "X-MathBank-Launch-ID": SERVER_INSTANCE_ID,
+                },
+            )
+
+            repeated = client.post(
+                "/api/shutdown",
+                headers={
+                    "X-Local-Token": LOCAL_TOKEN,
+                    "X-MathBank-Launch-ID": SERVER_INSTANCE_ID,
+                },
+            )
+    finally:
+        _SHUTDOWN_SCHEDULED.clear()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert repeated.status_code == 200
+    assert repeated.json()["status"] == "already_stopping"
+    thread_class.assert_called_once()
+    assert thread_class.call_args.kwargs["daemon"] is True
+    thread_class.return_value.start.assert_called_once_with()
+    scheduled_target = thread_class.call_args.kwargs["target"]
+    with patch("main.time.sleep"), patch("main.signal.raise_signal") as raise_signal:
+        scheduled_target()
+    raise_signal.assert_called_once_with(signal.SIGINT)
+
+
+def test_api_settings_get(client):
+    # GET settings should always be allowed (does not require token)
+    response = client.get("/api/settings")
+    assert response.status_code == 200
+    data = response.json()
+    assert "prefer_engine" in data
+    assert "prefer_solve_model" in data
+
+
+def test_api_questions_crud(client):
+    # 1. Get initial empty question list
+    response = client.get("/api/questions")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+    assert len(response.json()) == 0
+    # 2. Create a new question with valid X-Local-Token
+    headers = {"X-Local-Token": LOCAL_TOKEN}
+    payload = {
+        "content": "测试API题目干 $a^2+b^2=c^2$",
+        "question_type": "single_choice",
+        "category_compulsory": "必修一",
+        "category_chapter": "第一章",
+        "category_knowledge": "勾股定理",
+        "difficulty": "medium",
+        "source": "单元测试",
+        "answer_markdown": "答案解析内容",
+        "review": "评述内容",
+        "figure_align": "bottom_left",
+        "figure_align_custom": "true",
+        "figure_size": "large",
+        "related_question_id": "",
+        "image_paths": "[]"
+    }
+    
+    response = client.post("/api/questions", data=payload, headers=headers)
+    assert response.status_code == 200
+    res_data = response.json()
+    assert res_data["status"] == "success"
+    created_q = res_data["question"]
+    assert created_q["id"] is not None
+    assert created_q["content"] == payload["content"]
+    assert created_q["question_type"] == "single_choice"
+    assert created_q["category_compulsory"] == "必修一"
+    assert created_q["figure_align"] == "bottom_left"
+    assert created_q["figure_align_custom"] is True
+    assert created_q["figure_size"] == "large"
+    
+    question_id = created_q["id"]
+
+    # 3. Read the specific question (single question API)
+    response = client.get(f"/api/questions/{question_id}")
+    assert response.status_code == 200
+    fetched_q = response.json()
+    assert fetched_q["id"] == question_id
+    assert fetched_q["answer_markdown"] == "答案解析内容"
+    assert fetched_q["review"] == "评述内容"
+    assert fetched_q["figure_align"] == "bottom_left"
+    assert fetched_q["figure_align_custom"] is True
+    assert fetched_q["figure_size"] == "large"
+
+    # 4. Filter list of questions
+    response = client.get("/api/questions?compulsory=必修一&difficulty=medium")
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["id"] == question_id
+    assert response.json()[0]["has_answer"] is True
+    assert response.json()[0]["figure_align"] == "bottom_left"
+    assert response.json()[0]["figure_align_custom"] is True
+    assert response.json()[0]["figure_size"] == "large"
+    assert "answer_markdown" not in response.json()[0]
+
+    # Filter with mismatching criteria
+    response = client.get("/api/questions?compulsory=必修一&difficulty=hard")
+    assert response.status_code == 200
+    assert len(response.json()) == 0
+
+    # 5. Update the question
+    update_payload = payload.copy()
+    update_payload.pop("figure_align_custom")
+    update_payload.pop("figure_size")
+    update_payload["content"] = "更新后的API题目干"
+    update_payload["difficulty"] = "challenge"
+    
+    response = client.put(f"/api/questions/{question_id}", data=update_payload, headers=headers)
+    assert response.status_code == 200
+    res_data_update = response.json()
+    assert res_data_update["status"] == "success"
+    updated_q = res_data_update["question"]
+    assert updated_q["id"] == question_id
+    assert updated_q["content"] == "更新后的API题目干"
+    assert updated_q["difficulty"] == "challenge"
+    assert updated_q["figure_align"] == "bottom_left"
+    assert updated_q["figure_align_custom"] is True
+    assert updated_q["figure_size"] == "large"
+
+    update_payload["figure_align_custom"] = "false"
+    response = client.put(
+        f"/api/questions/{question_id}", data=update_payload, headers=headers
+    )
+    assert response.status_code == 200
+    assert response.json()["question"]["figure_align_custom"] is False
+
+    # 6. Delete the question
+    response = client.delete(f"/api/questions/{question_id}", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+    # 7. Check list is empty again
+    response = client.get("/api/questions")
+    assert len(response.json()) == 0
+
+
+def test_questions_support_bounded_server_pagination_without_breaking_legacy_array(
+    client, db_session
+):
+    db_session.add_all(
+        [
+            Question(content=f"分页题 {index}", question_type="single_choice")
+            for index in range(25)
+        ]
+    )
+    db_session.commit()
+
+    paged = client.get("/api/questions?page=2&page_size=10&sort=asc")
+    legacy = client.get("/api/questions")
+
+    assert paged.status_code == 200
+    data = paged.json()
+    assert data["total"] == 25
+    assert data["page"] == 2
+    assert data["page_size"] == 10
+    assert data["total_pages"] == 3
+    assert len(data["items"]) == 10
+    assert [item["id"] for item in data["items"]] == list(range(11, 21))
+    assert [item["seq_num"] for item in data["items"]] == list(range(11, 21))
+    assert isinstance(legacy.json(), list)
+    assert len(legacy.json()) == 25
+
+
+def test_api_categories(client):
+    # GET categories should return category options
+    response = client.get("/api/categories")
+    assert response.status_code == 200
+    assert isinstance(response.json(), dict)
+
+
+def test_ai_classify_returns_coarse_form_without_question_type():
+    provider = SimpleNamespace(
+        api_key="test-key",
+        api_base="https://example.invalid/v1",
+        model_name="test-model",
+        credential_label="test-provider",
+        reasoning_effort=None,
+        provider_code="test",
+    )
+    response = MagicMock()
+    response.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps(
+                        {
+                            "compulsory": "必修一",
+                            "chapter": "1. 集合",
+                            "question_form": "single_choice",
+                        },
+                        ensure_ascii=False,
+                    )
+                }
+            }
+        ]
+    }
+
+    with patch("main.resolve_text_provider", return_value=provider), patch(
+        "main.post_chat_completion", return_value=response
+    ), patch(
+        "main.get_current_curriculum", return_value={"必修一": {"1. 集合": []}}
+    ):
+        from main import ai_classify
+
+        ai_result = ai_classify("设集合 $A=\\{1,2\\}$，判断下列说法。")
+        fillin_result = ai_classify("实数 $a$ 的取值范围为\\fillin")
+        choices_result = ai_classify(
+            "下列结论正确的是\\begin{choices}\\item A\\item B\\end{choices}"
+        )
+
+    assert ai_result == {
+        "status": "success",
+        "compulsory": "必修一",
+        "chapter": "1. 集合",
+        "question_form": "choice",
+        "question_form_source": "ai",
+    }
+    assert fillin_result["question_form"] == "fill_in_blank"
+    assert fillin_result["question_form_source"] == "structure"
+    assert choices_result["question_form"] == "choice"
+    assert choices_result["question_form_source"] == "structure"
+    assert "question_type" not in ai_result
+    assert "question_type" not in fillin_result
+    assert "question_type" not in choices_result
+
+
+def test_api_stats(client):
+    # GET stats should return correct question counts
+    response = client.get("/api/stats")
+    assert response.status_code == 200
+    stats = response.json()
+    assert stats["status"] == "success"
+    assert "total_count" in stats
+    assert "easy_error_count" in stats
+    assert "challenge_count" in stats
+    assert "qiangji_count" in stats
+    assert stats["total_count"] == 0
+
+
+def test_api_search_by_review(client):
+    headers = {"X-Local-Token": LOCAL_TOKEN}
+    payload = {
+        "content": "这是一道特殊的代数题",
+        "question_type": "single_choice",
+        "category_compulsory": "必修一",
+        "category_chapter": "第一章",
+        "category_knowledge": "勾股定理",
+        "difficulty": "medium",
+        "source": "单元测试",
+        "answer_markdown": "答案解析内容",
+        "review": "这是名师特别推荐的精品评析",
+        "tags": "高一,期中,真题",
+        "related_question_id": "",
+        "image_paths": "[]"
+    }
+    # Create question
+    response = client.post("/api/questions", data=payload, headers=headers)
+    assert response.status_code == 200
+    q_id = response.json()["question"]["id"]
+
+    try:
+        # Search for something in content
+        response = client.get("/api/questions?q=特殊的代数")
+        assert response.status_code == 200
+        assert len(response.json()) == 1
+        assert response.json()[0]["id"] == q_id
+
+        # Search for something in review
+        response = client.get("/api/questions?q=精品评析")
+        assert response.status_code == 200
+        assert len(response.json()) == 1
+        assert response.json()[0]["id"] == q_id
+
+        # Search for something in tags
+        response = client.get("/api/questions?q=期中")
+        assert response.status_code == 200
+        assert len(response.json()) == 1
+        assert response.json()[0]["id"] == q_id
+        assert response.json()[0]["tags"] == "高一,期中,真题"
+
+        # Search for non-existent text
+        response = client.get("/api/questions?q=不存在的关键字")
+        assert response.status_code == 200
+        assert len(response.json()) == 0
+    finally:
+        # Clean up
+        client.delete(f"/api/questions/{q_id}", headers=headers)
+
+
+def test_api_metadata_config(client):
+    headers = {"X-Local-Token": LOCAL_TOKEN}
+    # 1. GET metadata
+    response = client.get("/api/config/metadata")
+    assert response.status_code == 200
+    data = response.json()
+    assert "question_types" in data
+    assert "difficulties" in data
+    assert "curriculum" in data
+
+    # 保存原始配置以便还原
+    original_config = data
+
+    try:
+        # 2. POST custom config (Forbidden without token)
+        test_payload = {
+            "question_types": [{"value": "test_type", "label": "测试题型"}],
+            "difficulties": [{"value": "test_diff", "label": "测试难度", "color": "color-test"}],
+            "curriculum": {"测试学段": {"测试章节": ["测试小节"]}}
+        }
+        response = client.post("/api/config/metadata", json=test_payload)
+        assert response.status_code == 403
+
+        # 3. POST custom config (Success with token)
+        response = client.post("/api/config/metadata", json=test_payload, headers=headers)
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+
+        # 4. Verify config updated
+        response = client.get("/api/config/metadata")
+        assert response.status_code == 200
+        new_data = response.json()
+        assert new_data["question_types"][0]["value"] == "test_type"
+        assert new_data["curriculum"]["测试学段"]["测试章节"] == ["测试小节"]
+    finally:
+        # 5. Restore original config
+        client.post("/api/config/metadata", json=original_config, headers=headers)
+
+
+def test_curriculum_preset_api(client):
+    for version in ("A", "B", "S", "H"):
+        response = client.get(f"/api/config/curriculum-presets/{version}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["version"] == version
+        assert data["name"]
+        assert data["metadata"]["curriculum"]
+
+    response = client.get("/api/config/curriculum-presets/unknown")
+    assert response.status_code == 404
+
+
+def test_pdf_task_and_crop(client):
+    headers = {"X-Local-Token": LOCAL_TOKEN}
+    # 1. Test POST /api/upload/pdf-task with invalid format
+    response = client.post(
+        "/api/upload/pdf-task",
+        files={"file": ("test.txt", b"some plain text", "text/plain")},
+        data={"generate_answers": "false"},
+        headers=headers
+    )
+    assert response.status_code == 400
+    assert "必须为 .pdf 格式" in response.json()["message"]
+
+    # 2. Test status route for non-existent task
+    response = client.get("/api/tasks/non-existent-task-id/status")
+    assert response.status_code == 404
+
+    # 3. Test clear-temp-crops endpoint
+    payload = {"paths": ["/static/uploads/tmp/pdf_crop_test_nonexistent.png"]}
+    response = client.post("/api/ai/clear-temp-crops", json=payload, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+
+def test_api_ai_solve_with_ocr(client):
+    headers = {"X-Local-Token": LOCAL_TOKEN}
+    
+    with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "fake_key"}):
+        with patch("mathbank.ai_http.robust_request_post") as mock_post:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json.return_value = {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "\\textbf{【参考答案】}：2\n\\textbf{【详细解析】}：求导结果正确\n\\textbf{【核心知识点】}：导数"
+                        }
+                    }
+                ]
+            }
+            mock_post.return_value = mock_resp
+
+            payload = {
+                "content": "已知 $f(x) = x^2$，求 $f'(1)$",
+                "question_type": "detailed_answer",
+                "ocr_result": "OCR识别的草稿：求导得到2x，带入1得到2",
+                "custom_prompt": "请简化解答步骤",
+                "thinking": "disabled",
+                "model": "DEEPSEEK/deepseek-chat"
+            }
+            
+            response = client.post("/api/ai/solve", data=payload, headers=headers)
+            assert response.status_code == 200
+            res_data = response.json()
+            assert res_data["status"] == "success"
+            assert "2" in res_data["solution"]
+            
+            # Verify request payload included OCR context and custom prompt
+            args, kwargs = mock_post.call_args
+            sent_data = kwargs["json"]
+            user_msg = sent_data["messages"][1]["content"]
+            assert "已有的 OCR 识别解析/草稿内容如下" in user_msg
+            assert "OCR识别的草稿" in user_msg
+            assert "请简化解答步骤" in user_msg
+            assert "已知 $f(x) = x^2$" in user_msg
+
+
+@pytest.mark.parametrize(
+    ("model", "thinking", "expected_limit", "expected_budget", "expected_effort"),
+    [
+        ("BAILIAN/qwen3.7-plus", "enabled", 32768, 16384, None),
+        ("BAILIAN/qwen3.7-plus", "disabled", 16384, None, None),
+        ("BAILIAN/qwen3.8-max", "enabled", 32768, None, "medium"),
+    ],
+)
+def test_bailian_solve_uses_model_specific_thinking_policy(
+    client,
+    model,
+    thinking,
+    expected_limit,
+    expected_budget,
+    expected_effort,
+):
+    response_payload = MagicMock(status_code=200)
+    response_payload.json.return_value = {
+        "choices": [{"message": {"content": "【参考答案】2\n【详细解析】略"}}]
+    }
+    with patch.dict(os.environ, {"ALI_BAILIAN_API_KEY": "bailian-key"}), patch(
+        "mathbank.ai_http.robust_request_post", return_value=response_payload
+    ) as mock_post:
+        response = client.post(
+            "/api/ai/solve",
+            data={
+                "content": "求 $1+1$。",
+                "question_type": "detailed_answer",
+                "thinking": thinking,
+                "model": model,
+                "stream": "false",
+            },
+            headers={"X-Local-Token": LOCAL_TOKEN},
+        )
+
+    assert response.status_code == 200
+    sent = mock_post.call_args.kwargs["json"]
+    assert sent["enable_thinking"] is (thinking == "enabled")
+    assert sent["max_completion_tokens"] == expected_limit
+    assert "max_tokens" not in sent
+    if expected_budget is None:
+        assert "thinking_budget" not in sent
+    else:
+        assert sent["thinking_budget"] == expected_budget
+    if expected_effort is None:
+        assert "reasoning_effort" not in sent
+    else:
+        assert sent["reasoning_effort"] == expected_effort
+
+
+def test_parse_paper_flows_use_shared_provider_resolution(client):
+    from unittest.mock import MagicMock, patch
+    import re
+    from main import parse_paper_text_internal
+
+    headers = {"X-Local-Token": LOCAL_TOKEN}
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "content": r'''{
+                        "questions": [{
+                            "content": "求 $1+1$ 的值。
+第二行 $\frac{1}{2}$。",
+                            "answer_markdown": "",
+                            "referenced_images": []
+                        }]
+                    }'''
+                }
+            }
+        ]
+    }
+
+    def provider_response(_url, **kwargs):
+        user_content = kwargs["json"]["messages"][1]["content"]
+        lock_ids = re.findall(r'id="(MBM_[^"]+)"', user_content)
+        if not lock_ids:
+            return mock_resp
+        locked_resp = MagicMock()
+        locked_resp.status_code = 200
+        locked_resp.json.return_value = {
+            "choices": [{
+                "message": {
+                    "content": json.dumps({
+                        "questions": [{
+                            "content": f"求 [[{lock_ids[0]}]] 的值。",
+                            "answer_markdown": "",
+                            "referenced_images": [],
+                        }]
+                    }, ensure_ascii=False)
+                }
+            }]
+        }
+        return locked_resp
+
+    provider_env = {
+        "PREFER_PARSE_MODEL": "BAILIAN/qwen3.7-max:high",
+        "ALI_BAILIAN_API_KEY": "fake-bailian-key",
+        "ALI_BAILIAN_API_BASE": "https://bailian.example/v1/",
+    }
+    with patch.dict(os.environ, provider_env):
+        with patch("mathbank.ai_http.robust_request_post", side_effect=provider_response) as mock_post:
+            response = client.post(
+                "/api/ai/parse-paper",
+                data={
+                    "latex_content": "求 $1+1$ 的值。",
+                    "paper_title": "测试试卷",
+                    "image_mapping_json": "{}",
+                    "generate_answers": "false",
+                },
+                headers=headers,
+            )
+            internal_questions = parse_paper_text_internal(
+                "求 $1+1$ 的值。", generate_answers_bool=False
+            )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert internal_questions[0]["content"] == "求 $1+1$ 的值。\n第二行 $\\frac{1}{2}$。"
+    assert mock_post.call_count == 2
+    for call in mock_post.call_args_list:
+        args, kwargs = call
+        assert args[0] == "https://bailian.example/v1/chat/completions"
+        assert kwargs["json"]["model"] == "qwen3.7-max"
+        assert kwargs["json"]["enable_thinking"] is False
+        assert "reasoning_effort" not in kwargs["json"]
+        assert "thinking_budget" not in kwargs["json"]
+        assert "max_tokens" not in kwargs["json"]
+        assert kwargs["timeout"] == 180
+
+def test_figure_align_api(client):
+    headers = {"X-Local-Token": LOCAL_TOKEN}
+    payload = {
+        "content": "插图排版测试题目 $x+y$",
+        "question_type": "single_choice",
+        "category_compulsory": "必修一",
+        "category_chapter": "集合",
+        "category_knowledge": "集合的含义",
+        "difficulty": "easy",
+        "source": "单元测试",
+        "answer_markdown": "答案",
+        "review": "",
+        "tikz_code": "",
+        "figure_align": "right",
+        "tags": "",
+        "related_question_id": "",
+        "image_paths": "[]"
+    }
+
+    response = client.post("/api/questions", data=payload, headers=headers)
+    assert response.status_code == 200
+    q_id = response.json()["question"]["id"]
+    assert response.json()["question"]["figure_align"] == "right"
+    assert response.json()["question"]["figure_align_custom"] is False
+    assert response.json()["question"]["figure_size"] == "auto"
+
+    # Update figure align to 'center' via dedicated endpoint
+    res_center = client.post(f"/api/questions/{q_id}/figure_align", data={"figure_align": "center"}, headers=headers)
+    assert res_center.status_code == 200
+    assert res_center.json()["figure_align"] == "center"
+    assert res_center.json()["figure_align_custom"] is True
+
+    # Query back
+    res_get = client.get(f"/api/questions/{q_id}")
+    assert res_get.status_code == 200
+    assert res_get.json()["figure_align"] == "center"
+    assert res_get.json()["figure_align_custom"] is True
+    assert res_get.json()["figure_size"] == "auto"
+
+    # The legacy position-only endpoint accepts the fourth supported position.
+    res_left = client.post(
+        f"/api/questions/{q_id}/figure_align",
+        data={"figure_align": "bottom_left"},
+        headers=headers,
+    )
+    assert res_left.status_code == 200
+    assert res_left.json()["figure_align"] == "bottom_left"
+    assert client.get(f"/api/questions/{q_id}").json()["figure_align"] == "bottom_left"
+
+    # The v9 layout endpoint persists both validated fields atomically.
+    res_layout = client.post(
+        f"/api/questions/{q_id}/figure_layout",
+        data={"figure_align": "bottom_left", "figure_size": "large"},
+        headers=headers,
+    )
+    assert res_layout.status_code == 200
+    assert res_layout.json()["figure_align"] == "bottom_left"
+    assert res_layout.json()["figure_align_custom"] is True
+    assert res_layout.json()["figure_size"] == "large"
+    persisted_left = client.get(f"/api/questions/{q_id}").json()
+    assert persisted_left["figure_align"] == "bottom_left"
+    assert persisted_left["figure_size"] == "large"
+
+    # The legacy endpoint remains compatible and must preserve the size.
+    res_legacy = client.post(
+        f"/api/questions/{q_id}/figure_align",
+        data={"figure_align": "right"},
+        headers=headers,
+    )
+    assert res_legacy.status_code == 200
+    res_get = client.get(f"/api/questions/{q_id}")
+    assert res_get.json()["figure_align"] == "right"
+    assert res_get.json()["figure_align_custom"] is True
+    assert res_get.json()["figure_size"] == "large"
+
+    for invalid_layout in (
+        {"figure_align": "floating", "figure_size": "medium"},
+        {"figure_align": "center", "figure_size": "huge"},
+    ):
+        invalid = client.post(
+            f"/api/questions/{q_id}/figure_layout",
+            data=invalid_layout,
+            headers=headers,
+        )
+        assert invalid.status_code == 400
+
+    unchanged = client.get(f"/api/questions/{q_id}").json()
+    assert unchanged["figure_align"] == "right"
+    assert unchanged["figure_align_custom"] is True
+    assert unchanged["figure_size"] == "large"
+
+
+def test_paper_export_routes_forward_request_figure_size(client, db_session):
+    question = Question(
+        content="插图导出透传题",
+        question_type="detailed_answer",
+        figure_align="right",
+        figure_size="small",
+    )
+    db_session.add(question)
+    db_session.commit()
+    captured_questions = []
+
+    def capture_latex(_title, _subtitle, _paper_type, questions_data, **_kwargs):
+        captured_questions.append(questions_data)
+        return r"\documentclass{article}\begin{document}ok\end{document}"
+
+    def capture_word(_title, _subtitle, _paper_type, questions_data, **_kwargs):
+        captured_questions.append(questions_data)
+        return b"PK-docx", {
+            "native_formulas": 0,
+            "fallback_formulas": 0,
+            "failed_formulas": 0,
+            "missing_images": 0,
+            "answer_card_omitted": False,
+        }
+
+    payload = {
+        "title": "插图尺寸透传",
+        "paper_type": "exam",
+        "questions": [{
+            "id": question.id,
+            "score": 12,
+            "figure_align": "bottom_right",
+            "figure_align_custom": True,
+            "figure_size": "large",
+        }],
+    }
+    headers = {"X-Local-Token": LOCAL_TOKEN}
+    with (
+        patch("main.build_latex_document", side_effect=capture_latex),
+        patch("main.collect_referenced_images", return_value=[]),
+        patch("main.create_tex_zip_package", return_value=b"PK-tex"),
+        patch("main.compile_tex_to_pdf", return_value=(b"%PDF-test", "")),
+        patch("main.create_full_bundle_zip_package", return_value=b"PK-bundle"),
+        patch("main.build_word_document", side_effect=capture_word),
+        patch("main.create_word_bundle_zip", return_value=b"PK-word"),
+    ):
+        for endpoint in (
+            "/api/paper/export/tex",
+            "/api/paper/export/bundle",
+            "/api/paper/export/pdf",
+            "/api/paper/export/word",
+        ):
+            response = client.post(endpoint, json=payload, headers=headers)
+            assert response.status_code == 200, (endpoint, response.text)
+
+    assert captured_questions
+    for questions_data in captured_questions:
+        exported_question = questions_data[0]["question"]
+        assert exported_question["figure_align"] == "bottom_right"
+        assert exported_question["figure_align_custom"] is True
+        assert exported_question["figure_size"] == "large"
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    (
+        "/api/paper/export/tex",
+        "/api/paper/export/bundle",
+        "/api/paper/export/pdf",
+        "/api/paper/export/word",
+    ),
+)
+def test_paper_export_routes_reject_incomplete_question_lists_before_building(
+    client, db_session, endpoint
+):
+    question = Question(content="导出输入校验题", question_type="detailed_answer")
+    db_session.add(question)
+    db_session.commit()
+    headers = {"X-Local-Token": LOCAL_TOKEN}
+    invalid_cases = (
+        ([], "至少需要包含一道题目"),
+        ([{"id": question.id}, {"id": question.id}], "不能在一份试卷中重复"),
+        ([{"id": question.id + 100000}], "已删除或不存在"),
+        ([{"id": "not-an-id"}], "无效的题目 ID"),
+    )
+
+    with (
+        patch(
+            "main.build_latex_document",
+            side_effect=AssertionError("invalid request reached LaTeX builder"),
+        ) as latex_builder,
+        patch(
+            "main.build_answer_sheet_latex",
+            side_effect=AssertionError("invalid request reached answer sheet builder"),
+        ) as answer_sheet_builder,
+        patch(
+            "main.build_word_document",
+            side_effect=AssertionError("invalid request reached Word builder"),
+        ) as word_builder,
+    ):
+        for questions, expected_message in invalid_cases:
+            response = client.post(
+                endpoint,
+                json={"title": "输入校验", "questions": questions},
+                headers=headers,
+            )
+            assert response.status_code == 400, (endpoint, response.text)
+            assert expected_message in response.json()["message"]
+
+    latex_builder.assert_not_called()
+    answer_sheet_builder.assert_not_called()
+    word_builder.assert_not_called()
+
+
+def test_question_persists_editable_tikz_assets_and_original_reference(client):
+    headers = {"X-Local-Token": LOCAL_TOKEN}
+    tiny_png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUB"
+        "AScY42YAAAAASUVORK5CYII="
+    )
+    upload = client.post(
+        "/api/upload",
+        files={"file": ("tikz.png", tiny_png, "image/png")},
+        headers=headers,
+    )
+    assert upload.status_code == 200
+    image_path = upload.json()["file_path"]
+    reference_upload = client.post(
+        "/api/upload",
+        files={"file": ("original.png", tiny_png, "image/png")},
+        headers=headers,
+    )
+    assert reference_upload.status_code == 200
+    reference_path = reference_upload.json()["file_path"]
+    answer_reference_upload = client.post(
+        "/api/upload",
+        files={"file": ("answer-original.png", tiny_png, "image/png")},
+        headers=headers,
+    )
+    assert answer_reference_upload.status_code == 200
+    answer_reference_path = answer_reference_upload.json()["file_path"]
+    content_second_upload = client.post(
+        "/api/upload",
+        files={"file": ("tikz-second.png", tiny_png, "image/png")},
+        headers=headers,
+    )
+    assert content_second_upload.status_code == 200
+    content_second_path = content_second_upload.json()["file_path"]
+    tikz_code = "\\begin{tikzpicture}\\draw (0,0)--(1,1);\\end{tikzpicture}"
+    content_assets = [
+        {
+            "id": "content_tikz_first",
+            "image_path": image_path,
+            "tikz_code": tikz_code,
+            "instruction": "题干第一幅图",
+            "reference_image_path": reference_path,
+        },
+        {
+            "id": "content_tikz_second",
+            "image_path": content_second_path,
+            "tikz_code": tikz_code,
+            "instruction": "题干第二幅图",
+        },
+    ]
+    asset = {
+        "id": "tikz_test_asset",
+        "image_path": image_path,
+        "tikz_code": tikz_code,
+        "instruction": "绘制线段",
+        "reference_image_path": answer_reference_path,
+    }
+    payload = {
+        "content": (
+            f"TikZ 多幅题干插图持久化测试\n\n![TikZ]({image_path})"
+            f"\n\n![TikZ]({content_second_path})"
+        ),
+        "question_type": "detailed_answer",
+        "category_compulsory": "必修一",
+        "category_chapter": "几何",
+        "category_knowledge": "线段",
+        "difficulty": "medium",
+        "answer_markdown": f"![TikZ 几何图]({image_path})",
+        "image_paths": json.dumps([
+            image_path,
+            content_second_path,
+            reference_path,
+            answer_reference_path,
+        ]),
+        "tikz_code": tikz_code,
+        "tikz_reference_image_path": reference_path,
+        "content_tikz_assets": json.dumps(content_assets, ensure_ascii=False),
+        "answer_tikz_assets": json.dumps([asset], ensure_ascii=False),
+    }
+
+    response = client.post("/api/questions", data=payload, headers=headers)
+
+    assert response.status_code == 200
+    stored = response.json()["question"]
+    assert stored["content_tikz_assets"] == content_assets
+    assert stored["answer_tikz_assets"] == [asset]
+    assert stored["tikz_reference_image_path"] == reference_path
+    assert reference_path not in stored["image_paths"]
+    assert answer_reference_path not in stored["image_paths"]
+    assert reference_path not in stored["content"]
+    assert answer_reference_path not in stored["content"]
+    assert answer_reference_path not in stored["answer_markdown"]
+    detail = client.get(f"/api/questions/{stored['id']}")
+    assert detail.status_code == 200
+    assert len(detail.json()["content_tikz_assets"]) == 2
+    assert detail.json()["content_tikz_assets"][1]["instruction"] == "题干第二幅图"
+    assert detail.json()["answer_tikz_assets"][0]["tikz_code"] == tikz_code
+    assert detail.json()["tikz_reference_image_path"] == reference_path
+    assert reference_path not in detail.json()["image_paths"]
+    assert answer_reference_path not in detail.json()["image_paths"]
+    summary = client.get("/api/questions").json()[0]
+    assert "content_tikz_assets" not in summary
+    assert "answer_tikz_assets" not in summary
+    assert "tikz_reference_image_path" not in summary
+
+
+def test_version_and_update_check_api(client):
+    from unittest.mock import patch, MagicMock
+    from main import parse_version_tuple
+    
+    # 1. Test version tuple parser
+    assert parse_version_tuple("v2.0.1") == (2, 0, 1)
+    assert parse_version_tuple("2.1.0-beta") == (2, 1, 0)
+    assert parse_version_tuple("V3") == (3, 0, 0)
+    assert parse_version_tuple("v2.1.0") > parse_version_tuple("2.0.1")
+    
+    # 2. Test GET /api/version
+    res_ver = client.get("/api/version")
+    assert res_ver.status_code == 200
+    data_ver = res_ver.json()
+    assert "current_version" in data_ver
+    assert data_ver["repo"] == "JudgePeach/math-question-bank"
+    assert data_ver["server_instance_id"] == SERVER_INSTANCE_ID
+
+    # 3. Test GET /api/version/check-update with mocked GitHub response
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "tag_name": "v9.9.9",
+        "name": "Release 9.9.9",
+        "body": "Mocked changelog",
+        "html_url": "https://github.com/JudgePeach/math-question-bank/releases/tag/v9.9.9",
+        "published_at": "2026-08-09T00:00:00Z",
+        "assets": [
+            {
+                "name": "MathBank-macOS.zip",
+                "size": 10485760,
+                "download_count": 100,
+                "browser_download_url": "https://example.com/mac.zip"
+            },
+            {
+                "name": "MathBank-Windows-x64.zip",
+                "size": 20971520,
+                "download_count": 200,
+                "browser_download_url": "https://example.com/win.zip"
+            }
+        ]
+    }
+    
+    with patch("mathbank.ai_http.requests.get", return_value=mock_resp):
+        res_update = client.get("/api/version/check-update")
+        assert res_update.status_code == 200
+        data_update = res_update.json()
+        assert data_update["status"] == "success"
+        assert data_update["has_update"] is True
+        assert data_update["latest_version"] == "v9.9.9"
+        assert "macOS" in data_update["assets"]
+        assert "Windows" in data_update["assets"]
+        assert data_update["assets"]["macOS"]["size_mb"] == 10.0
+
+
+def test_solve_without_model_uses_saved_solver_and_shared_prompt(client):
+    from mathbank.prompts import build_ai_solve_prompts
+
+    with patch.dict(os.environ, {"PREFER_SOLVE_MODEL": "DEEPSEEK/deepseek-chat", "DEEPSEEK_API_KEY": "fake"}), patch("main.post_chat_completion") as post:
+        post.return_value.json.return_value = {"choices": [{"message": {"content": "answer"}}]}
+        response = client.post("/api/ai/solve", data={"content": "求 1+1", "question_type": "fill_in_blank"}, headers={"X-Local-Token": LOCAL_TOKEN})
+        assert response.status_code == 200
+        payload = post.call_args.args[1]
+        assert payload["model"] == "deepseek-chat"
+        system, user = build_ai_solve_prompts("fill_in_blank", "求 1+1")
+        assert payload["messages"] == [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def test_deepseek_ocr_settings_persist_and_support_older_clients(client, tmp_path, monkeypatch):
+    import main
+    env_path = tmp_path / '.env'
+    monkeypatch.setattr(main, 'ENV_FILE', env_path)
+    with patch.dict(os.environ, {'DEEPSEEK_API_KEY':'test-key', 'DEEPSEEK_OCR_MODEL':''}):
+        assert client.get('/api/settings').json()['deepseek_model'] == 'deepseek-flash'
+        response = client.post('/api/settings/save', data={
+            'deepseek_key':'test-key', 'prefer_engine':'deepseek', 'deepseek_model':'deepseek-flash:high',
+        }, headers={'X-Local-Token':LOCAL_TOKEN})
+        assert response.status_code == 200
+        settings = client.get('/api/settings').json()
+        assert settings['prefer_engine'] == 'deepseek'
+        assert settings['deepseek_model'] == 'deepseek-flash:high'
+        assert 'DEEPSEEK_OCR_MODEL=deepseek-flash:high' in env_path.read_text()
+        response = client.post('/api/settings/save', data={
+            'deepseek_key':settings['deepseek_key'], 'prefer_engine':'deepseek',
+        }, headers={'X-Local-Token':LOCAL_TOKEN})
+        assert response.status_code == 200
+        assert os.environ['DEEPSEEK_API_KEY'] == 'test-key'
+        assert client.get('/api/settings').json()['deepseek_model'] == 'deepseek-flash:high'
+        assert env_path.read_text().count('DEEPSEEK_OCR_MODEL=') == 1
+
+
+def test_deepseek_ocr_model_rejects_env_line_injection(client, tmp_path, monkeypatch):
+    import main
+    env_path = tmp_path / '.env'
+    env_path.write_text('DEEPSEEK_OCR_MODEL=deepseek-flash\n')
+    monkeypatch.setattr(main, 'ENV_FILE', env_path)
+    response = client.post('/api/settings/save', data={
+        'deepseek_model':'deepseek-flash\nUNEXPECTED=1',
+    }, headers={'X-Local-Token':LOCAL_TOKEN})
+    assert response.status_code == 500
+    assert '换行' in response.json()['message']
+    assert env_path.read_text() == 'DEEPSEEK_OCR_MODEL=deepseek-flash\n'

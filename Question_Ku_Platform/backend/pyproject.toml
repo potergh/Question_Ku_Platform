@@ -1,0 +1,8 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# 真实跑 OCR 的回归每卷约 1.5–3 分钟，默认跳过；显式跑：pytest -m slow
+markers = [
+    "slow: 真实执行 OCR 的回归（每卷约 1.5–3 分钟；默认不跑，用 `pytest -m slow` 显式运行）",
+]
+addopts = "-m 'not slow'"

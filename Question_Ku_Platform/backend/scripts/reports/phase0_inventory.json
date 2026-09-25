@@ -1,0 +1,93 @@
+{
+  "generated_at": "2026-08-30T00:48:24",
+  "db_path": "D:\\家教\\Question_Ku_Platform\\data\\db.sqlite3",
+  "alembic_version": "7be1dc9c4638",
+  "counts": {
+    "practices": 3,
+    "sections": 3,
+    "questions": 21,
+    "blocks": 82
+  },
+  "block_type_counts": {
+    "answer_space": 21,
+    "image": 19,
+    "options": 21,
+    "text": 21
+  },
+  "practices": [
+    {
+      "id": "1e5faf6b-3519-4bf8-8ba4-708225a490f9",
+      "title": "练习测试",
+      "subject": "物理",
+      "grade": "中考",
+      "status": "exported",
+      "has_page_config": false,
+      "dir_exists": true,
+      "asset_files": 6,
+      "sections": 1,
+      "questions": 2,
+      "blocks": 8
+    },
+    {
+      "id": "daf6a44c-2641-45f5-83de-b4a8bf12d932",
+      "title": "初三上混合练习",
+      "subject": "物理",
+      "grade": "中考",
+      "status": "exported",
+      "has_page_config": true,
+      "dir_exists": true,
+      "asset_files": 25,
+      "sections": 1,
+      "questions": 9,
+      "blocks": 44
+    },
+    {
+      "id": "8c26369f-1e7d-4c28-974d-9bd6104b0433",
+      "title": "1",
+      "subject": null,
+      "grade": null,
+      "status": "exported",
+      "has_page_config": false,
+      "dir_exists": true,
+      "asset_files": 1,
+      "sections": 1,
+      "questions": 10,
+      "blocks": 30
+    }
+  ],
+  "issues": {
+    "empty_content": [],
+    "broken_images": [],
+    "external_image_refs": [
+      "practice=daf6a44c-2641-45f5-83de-b4a8bf12d932 question=7d508247-9fd6-4536-8f7d-b765944d67e1 (#5) 选项 A",
+      "practice=daf6a44c-2641-45f5-83de-b4a8bf12d932 question=7d508247-9fd6-4536-8f7d-b765944d67e1 (#5) 选项 B",
+      "practice=daf6a44c-2641-45f5-83de-b4a8bf12d932 question=7d508247-9fd6-4536-8f7d-b765944d67e1 (#5) 选项 C",
+      "practice=daf6a44c-2641-45f5-83de-b4a8bf12d932 question=7d508247-9fd6-4536-8f7d-b765944d67e1 (#5) 选项 D",
+      "practice=daf6a44c-2641-45f5-83de-b4a8bf12d932 question=9ad03fee-a1c9-4d5e-9ffb-470a1c54752b (#9) 选项 A",
+      "practice=daf6a44c-2641-45f5-83de-b4a8bf12d932 question=9ad03fee-a1c9-4d5e-9ffb-470a1c54752b (#9) 选项 B",
+      "practice=daf6a44c-2641-45f5-83de-b4a8bf12d932 question=9ad03fee-a1c9-4d5e-9ffb-470a1c54752b (#9) 选项 C",
+      "practice=daf6a44c-2641-45f5-83de-b4a8bf12d932 question=9ad03fee-a1c9-4d5e-9ffb-470a1c54752b (#9) 选项 D"
+    ],
+    "suspicious_latex": [],
+    "bad_options": []
+  },
+  "modified_questions": [
+    "practice=1e5faf6b-3519-4bf8-8ba4-708225a490f9 question=aa9aa5bb-40f0-4456-8cf9-087b73ae6723 (#1) type=multiple_choice",
+    "practice=1e5faf6b-3519-4bf8-8ba4-708225a490f9 question=684ee675-1471-4648-975e-5b351c258803 (#2) type=multiple_choice",
+    "practice=daf6a44c-2641-45f5-83de-b4a8bf12d932 question=50f3626e-003b-4e0b-b276-1094a9582183 (#1) type=single_choice",
+    "practice=daf6a44c-2641-45f5-83de-b4a8bf12d932 question=295f55c6-3b8f-410e-8223-0504337399e2 (#6) type=single_choice",
+    "practice=daf6a44c-2641-45f5-83de-b4a8bf12d932 question=91f9a78a-2b22-4a51-94a6-b327796b5b9c (#7) type=single_choice",
+    "practice=8c26369f-1e7d-4c28-974d-9bd6104b0433 question=1c57d9b8-176b-4fb4-9b2d-d7267b8b4bf7 (#2) type=single_choice",
+    "practice=8c26369f-1e7d-4c28-974d-9bd6104b0433 question=752210ed-9162-4563-b50a-e203304d890f (#7) type=single_choice",
+    "practice=8c26369f-1e7d-4c28-974d-9bd6104b0433 question=a19a270d-4c38-4273-b9ff-f1437082b03c (#8) type=single_choice",
+    "practice=8c26369f-1e7d-4c28-974d-9bd6104b0433 question=97277102-5d82-45d2-9242-e3f41a08ae24 (#9) type=single_choice"
+  ],
+  "issue_summary": {
+    "empty_content": 0,
+    "broken_images": 0,
+    "external_image_refs": 8,
+    "suspicious_latex": 0,
+    "bad_options": 0
+  },
+  "modified_question_count": 9
+}
