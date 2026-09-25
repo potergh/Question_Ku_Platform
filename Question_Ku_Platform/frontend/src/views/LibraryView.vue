@@ -219,13 +219,13 @@
         题目详情改为**弹窗**：单栏布局后右侧不再有常驻面板，点列表里的题即弹出。
         原先的空状态分支删了 —— 弹窗只在点题后出现，"没选题"这个状态不存在。
       -->
-      <el-dialog v-model="showDetail" title="题目详情" width="760px" top="4vh">
+      <el-dialog v-model="showDetail" title="题目详情" width="760px" top="4vh" draggable>
         <div class="bank-detail-body">
           <template v-if="detailQuestion">
         <el-descriptions :column="2" border size="small">
           <el-descriptions-item label="题号">{{ detailQuestion.question_number }}</el-descriptions-item>
-          <el-descriptions-item label="题型">{{ detailQuestion.question_type || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="学科">{{ detailQuestion.subject || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="题型">{{ questionTypeText(detailQuestion) }}</el-descriptions-item>
+          <el-descriptions-item label="学科">{{ subjectText(detailQuestion.subject) }}</el-descriptions-item>
           <el-descriptions-item label="难度">
             <el-rate v-model="detailQuestion.difficulty" :max="5" disabled size="small" />
           </el-descriptions-item>
@@ -390,7 +390,7 @@
             <el-tag size="small" type="warning">{{ Math.round((detailQuestion.ai_suggestions.confidence || 0) * 100) }}% 置信</el-tag>
           </div>
           <div class="ai-suggest-body">
-            <span v-if="detailQuestion.ai_suggestions.question_type">题型: {{ detailQuestion.ai_suggestions.question_type }}</span>
+            <span v-if="detailQuestion.ai_suggestions.question_type">题型: {{ QUESTION_TYPE_MAP[detailQuestion.ai_suggestions.question_type] || detailQuestion.ai_suggestions.question_type }}</span>
             <span v-if="detailQuestion.ai_suggestions.difficulty">难度: {{ detailQuestion.ai_suggestions.difficulty }}星</span>
           </div>
           <el-button size="small" type="warning" @click="acceptAI" :disabled="aiAccepted">采纳 AI 建议</el-button>
@@ -607,6 +607,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import { renderFullContent, renderPreview, renderOptionContent } from '../utils/render.js'
+import { QUESTION_TYPE_MAP } from '../utils/questionTypes'
 
 const questions = ref([])
 const sources = ref([])
@@ -1042,6 +1043,8 @@ const reviewTagType = (s) => ({ pending: 'warning', approved: 'success', rejecte
 const reviewText = (s) => ({ pending: '待审核', approved: '已通过', rejected: '已驳回' })[s] || s
 const categoryText = (c) => ({ knowledge: '知识点', skill: '技能', error_type: '错因', custom: '自定义' })[c] || c
 const subjectText = (s) => ({ physics: '物理', math: '数学', chemistry: '化学', english: '英语' })[s] || s || '未分类'
+// 题型中文：优先后端 question_type_zh，否则本地映射兜底（详情弹窗保存后重取可能不带 zh）
+const questionTypeText = (q) => q?.question_type_zh || QUESTION_TYPE_MAP[q?.question_type] || q?.question_type || '-'
 
 // ── Tag Management ──
 
