@@ -1352,6 +1352,25 @@ onUnmounted(() => {
   }
 }
 
+/*
+ * 滚动卡顿修复（性能）：
+ * 1) 题库列表这块面板里滚的是 50 张含图卡片，而 .panel 的 backdrop-filter 会在
+ *    每一帧滚动时重算整块模糊 —— 这是拖动掉帧的主因。只把「会滚长列表」的这一处
+ *    降级为半透明实色背景、关掉模糊，其余静态面板保留玻璃质感不受影响。
+ * 2) 离屏卡片用 content-visibility 跳过布局/绘制，滚进视口才渲染；
+ *    contain-intrinsic-size 的 auto 关键字会记住卡片上次实际高度，减少滚动条跳动。
+ */
+.bank-list.panel {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: var(--glass-bg-strong);
+}
+
+.bank-list-body .glass-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+}
+
 .library-view { max-width: 1200px; margin: 0 auto; }
 .library-header { margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-start; }
 .subtitle { color: var(--color-ink-muted); margin-top: 4px; }

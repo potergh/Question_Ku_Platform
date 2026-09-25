@@ -47,6 +47,17 @@ def test_render_settings_defaults():
     assert s["show_score"] is False
 
 
+def test_inline_image_width_in_html():
+    """行内图拖拽缩放后的 width（百分比）应进预览 HTML；无 width 仍走默认小图高。"""
+    from pathlib import Path
+    from app.services import render_ir
+    runs = [render_ir.InlineImage(src="asset://practice/a.webp", width=40),
+            render_ir.InlineImage(src="asset://practice/b.webp")]
+    html = render_ir.runs_html(runs, Path.cwd())
+    assert 'style="width:40%;max-width:100%;height:auto;vertical-align:middle"' in html
+    assert 'style="max-height:3.4em;vertical-align:middle"' in html
+
+
 async def test_build_html_contains_structure(client, test_db, tmp_path):
     detail = await _full_practice(client, test_db, tmp_path)
     practice = await _load_with_blocks(test_db, detail["id"])

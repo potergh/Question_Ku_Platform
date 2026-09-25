@@ -74,7 +74,7 @@ function renderInline(text, ctx) {
     html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
       imgCount++
       if (imgCount > ctx.maxImages) return ''
-      return `<img src="${url}" alt="${alt}" style="max-width:min(100%, 400px);max-height:300px;height:auto;margin:4px 0;border-radius:4px;" loading="lazy" />`
+      return `<img src="${url}" alt="${alt}" style="max-width:min(100%, 400px);max-height:300px;height:auto;margin:4px 0;border-radius:4px;" loading="lazy" decoding="async" />`
     })
   } else {
     // Strip images entirely
@@ -252,7 +252,7 @@ export function renderPreview(text, maxLen = 150) {
   // Extract images first
   const images = []
   let cleanText = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
-    images.push(`<img src="${url}" alt="${alt}" style="max-width:100px;max-height:70px;margin:2px;border-radius:3px;vertical-align:middle;" loading="lazy" />`)
+    images.push(`<img src="${url}" alt="${alt}" style="max-width:100px;max-height:70px;margin:2px;border-radius:3px;vertical-align:middle;" loading="lazy" decoding="async" />`)
     return ''
   })
 
@@ -308,7 +308,7 @@ export function renderOptionContent(text) {
 
   // 2. Images as small inline thumbnails
   html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
-    return `<img src="${url}" alt="${alt}" style="max-height:40px;vertical-align:middle;margin:0 4px;border-radius:3px;" loading="lazy" />`
+    return `<img src="${url}" alt="${alt}" style="max-height:40px;vertical-align:middle;margin:0 4px;border-radius:3px;" loading="lazy" decoding="async" />`
   })
 
   return html

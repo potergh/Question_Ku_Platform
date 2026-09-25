@@ -68,6 +68,8 @@ class HardBreak:
 @dataclass(frozen=True)
 class InlineImage:
     src: str
+    # 拖拽缩放后的宽度：None=自适应默认小图；数字=占行宽百分比（与块图 width 语义一致）
+    width: str | float | None = None
 
 
 @dataclass(frozen=True)
@@ -280,7 +282,7 @@ def inline_runs(nodes) -> list[Inline]:
         elif t == "hardBreak":
             out.append(HardBreak())
         elif t == "inlineImage":
-            out.append(InlineImage(src=attrs.get("src", "")))
+            out.append(InlineImage(src=attrs.get("src", ""), width=attrs.get("width") or None))
         elif t == "inlineFormula":
             out.append(InlineFormula(latex=attrs.get("latex", "")))
         elif t == "displayFormula":
@@ -587,8 +589,12 @@ def runs_html(runs, assets: Path) -> str:
         elif isinstance(r, HardBreak):
             out.append("<br>")
         elif isinstance(r, InlineImage):
-            out.append(f'<img src="{_asset_uri(r.src, assets)}" '
-                       f'style="max-height:3.4em;vertical-align:middle">')
+            if r.width not in (None, "", "fit"):
+                w = f"{r.width:g}%" if isinstance(r.width, (int, float)) else str(r.width)
+                style = f"width:{w};max-width:100%;height:auto;vertical-align:middle"
+            else:
+                style = "max-height:3.4em;vertical-align:middle"
+            out.append(f'<img src="{_asset_uri(r.src, assets)}" style="{style}">')
         elif isinstance(r, InlineFormula):
             delim = "$$" if r.display else "$"
             out.append(f"{delim}{_html.escape(r.latex)}{delim}")

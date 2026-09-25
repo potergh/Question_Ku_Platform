@@ -6,6 +6,7 @@ from app.services.rich_document import (
     doc_from_blocks,
     doc_from_snapshot,
     serialize,
+    validate_doc,
     DOC_SCHEMA_VERSION,
 )
 
@@ -142,3 +143,24 @@ def test_snapshot_fallback_matches_blocks():
 def test_serialize_roundtrip():
     doc = doc_from_blocks([FakeBlock("text", "中文 $x$ 内容")])
     assert json.loads(serialize(doc)) == doc
+
+
+def _inject_inline_width(doc, width):
+    for n in doc["content"][0]["content"]:
+        if n["type"] == "inlineImage":
+            n["attrs"]["width"] = width
+    return doc
+
+
+def test_validate_inline_image_with_width():
+    """选项/段落内行小图携带拖拽缩放后的 width（百分比）应通过校验。"""
+    doc = _inject_inline_width(
+        doc_from_blocks([FakeBlock("text", "看图 asset://practice/a.webp 结束")]), 40)
+    assert validate_doc(doc) == []
+
+
+def test_validate_inline_image_bad_width():
+    """width 越界（>100）应被拦下，避免脏数据进导出。"""
+    doc = _inject_inline_width(
+        doc_from_blocks([FakeBlock("text", "看图 asset://practice/a.webp 结束")]), 150)
+    assert any("width" in e for e in validate_doc(doc))

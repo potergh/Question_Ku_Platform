@@ -503,6 +503,16 @@ const removeCurrentOption = async () => {
 .qre-canvas :deep(.qre-space-tools) { position: absolute; right: 0; top: 0; display: none; }
 .qre-canvas :deep(.qre-space:hover .qre-space-tools) { display: block; }
 .qre-canvas :deep(.qre-inline-img) { height: 1.5em; vertical-align: text-bottom; }
+/* 行内图 NodeView：wrapper 行内定位以承载缩放手柄；选中描边 + 右下角手柄 */
+.qre-canvas :deep(.qre-inline-img-wrap) { position: relative; display: inline-block; }
+.qre-canvas :deep(.qre-inline-img-wrap[data-selected]) { outline: 2px solid #409eff; border-radius: 3px; }
+.qre-canvas :deep(.qre-inline-img-handle) {
+  position: absolute; bottom: -4px; right: -4px;
+  width: 10px; height: 10px;
+  background: #409eff; border: 2px solid white; border-radius: 2px;
+  cursor: ew-resize; z-index: 10;
+}
+.qre-canvas :deep(.qre-inline-img-missing) { color: #909399; font-size: 12px; }
 .qre-canvas :deep(.qre-formula-display) { text-align: center; margin: 6px 0; }
 .qre-canvas :deep(.qre-formula-inline),
 .qre-canvas :deep(.qre-formula-display) { cursor: pointer; border-radius: 4px; }

@@ -504,6 +504,20 @@ def _add_list(doc, node, ctx: "_DocxCtx", depth: int):
                 _add_list(doc, x, ctx, depth + 1)
 
 
+def _inline_img_pct(width):
+    """行内图 width → 百分比数字（0~100）；None/'fit'/非法 → None（走默认小图高）。"""
+    if isinstance(width, bool):
+        return None
+    if isinstance(width, (int, float)):
+        return float(width) or None
+    if isinstance(width, str) and width.endswith("%"):
+        try:
+            return float(width.removesuffix("%")) or None
+        except ValueError:
+            return None
+    return None
+
+
 def _add_runs(paragraph, runs, ctx: "_DocxCtx"):
     """行内 run → Word：marks → run 属性；公式 → OMML（失败降级图片）；行内图随基线。"""
     for r in runs or []:
@@ -514,10 +528,16 @@ def _add_runs(paragraph, runs, ctx: "_DocxCtx"):
         elif isinstance(r, render_ir.InlineImage):
             name = r.src.removeprefix("asset://practice/")
             path = ctx.assets / name
-            if path.exists():
-                paragraph.add_run().add_picture(_picture_source(path), height=Cm(0.9))
-            else:
+            if not path.exists():
                 paragraph.add_run(f"[图缺失:{name}]")
+                continue
+            run = paragraph.add_run()
+            # 有 width（百分比）→ 按内容宽折算，与块图一致；否则沿用默认行内小图高 0.9cm
+            pct = _inline_img_pct(r.width)
+            if pct is not None:
+                run.add_picture(_picture_source(path), width=int(ctx.content_width * pct / 100))
+            else:
+                run.add_picture(_picture_source(path), height=Cm(0.9))
         elif isinstance(r, render_ir.InlineFormula):
             _add_formula(paragraph, r.latex, r.display, ctx.fb, ctx.default_size)
 

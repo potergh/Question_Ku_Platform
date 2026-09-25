@@ -8,7 +8,7 @@
     inlineFormula  {type, attrs: {latex}}          行内公式
     displayFormula {type, attrs: {latex}}          独立公式
     image          {type, attrs: {src, align?, width?}}   块级图片
-    inlineImage    {type, attrs: {src}}            选项/段落内行内小图
+    inlineImage    {type, attrs: {src, width?}}    选项/段落内行内小图（width=拖拽缩放百分比）
     optionGroup    {type, content: [option]}       选项组（视觉连续、底层特殊节点）
     option         {type, attrs: {label}, content: [行内节点]}
     answerSpace    {type, attrs: {rows}}           答题留白
@@ -399,6 +399,23 @@ def _check_marks(marks, context: str) -> list[str]:
     return errors
 
 
+def _is_valid_img_width(w) -> bool:
+    """图片宽度取值：数字 0<w<=100（百分比）、'N%' 串、或 'fit'。"""
+    if isinstance(w, bool):
+        return False
+    if isinstance(w, (int, float)):
+        return 0 < w <= 100
+    if isinstance(w, str):
+        if w == "fit":
+            return True
+        if w.endswith("%"):
+            try:
+                return 0 < float(w.removesuffix("%")) <= 100
+            except ValueError:
+                return False
+    return False
+
+
 def _check_inline(nodes, context: str) -> list[str]:
     """校验行内节点序列；None/缺省按空内容容错（空选项等）。"""
     errors: list[str] = []
@@ -415,8 +432,13 @@ def _check_inline(nodes, context: str) -> list[str]:
                 errors.append(f"{context}: text 节点缺 text")
             else:
                 errors.extend(_check_marks(n.get("marks"), context))
-        elif t in ("inlineImage",) and not isinstance((n.get("attrs") or {}).get("src"), str):
-            errors.append(f"{context}: 行内图片缺 src")
+        elif t == "inlineImage":
+            a = n.get("attrs") or {}
+            if not isinstance(a.get("src"), str):
+                errors.append(f"{context}: 行内图片缺 src")
+            w = a.get("width")
+            if w is not None and not _is_valid_img_width(w):
+                errors.append(f"{context}: 行内图片 width 非法: {w}")
         elif t in ("inlineFormula", "displayFormula") and not isinstance(
                 (n.get("attrs") or {}).get("latex"), str):
             errors.append(f"{context}: 公式缺 latex")
