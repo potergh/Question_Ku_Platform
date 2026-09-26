@@ -253,11 +253,11 @@
                 <div v-for="(opt, oi) in libSharedOptions" :key="oi" class="option-rendered" v-html="opt.label + '. ' + renderOptionContent(opt.content)"></div>
               </div>
             </div>
-            <!-- 完形/阅读：逐小题，选项横向 -->
-            <template v-if="libPassageMode === 'perSub'">
+            <!-- 完形/阅读/任务型：逐小题（有选项则横向） -->
+            <template v-if="libPassageMode === 'perSub' || libPassageMode === 'stem'">
               <div v-for="(sub, si) in detailQuestion.sub_questions" :key="si" style="margin-bottom: 8px;">
                 <div class="rendered-preview"><b>{{ sub.label || `（${si + 1}）` }}</b> <span v-html="renderFullContent(sub.stem)"></span></div>
-                <div class="lib-opts-inline">
+                <div v-if="libPassageMode === 'perSub'" class="lib-opts-inline">
                   <div v-for="(opt, oi) in (sub.options || [])" :key="oi" class="option-rendered" v-html="opt.label + '. ' + renderOptionContent(opt.content)"></div>
                 </div>
               </div>
@@ -266,7 +266,7 @@
             <template v-else>
               <div class="lib-sub-index-row">
                 <span v-for="(sub, si) in detailQuestion.sub_questions" :key="si" class="lib-sub-index">
-                  {{ sub.label || `（${si + 1}）` }}<template v-if="libPassageMode === 'none'">——</template>
+                  {{ sub.label || `（${si + 1}）` }}<template v-if="libPassageMode === 'fillin'">——</template>
                 </span>
               </div>
             </template>
@@ -680,10 +680,12 @@ const libPassageMode = computed(() => {
   const subs = detailQuestion.value?.sub_questions || []
   if (!subs.length) return 'none'
   const withOpts = subs.filter((s) => (s.options || []).length)
-  if (!withOpts.length) return 'none'
-  const sigs = new Set(subs.map(libSubSig))
-  if (withOpts.length === subs.length && sigs.size === 1) return 'shared'
-  return 'perSub'
+  if (withOpts.length) {
+    const sigs = new Set(subs.map(libSubSig))
+    if (withOpts.length === subs.length && sigs.size === 1) return 'shared'
+    return 'perSub'
+  }
+  return detailQuestion.value?.question_type === 'use_of_english' ? 'fillin' : 'stem'
 })
 const libSharedOptions = computed(() => {
   const src = (detailQuestion.value?.sub_questions || []).find((s) => (s.options || []).length)

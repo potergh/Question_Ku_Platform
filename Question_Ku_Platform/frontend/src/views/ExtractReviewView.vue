@@ -173,13 +173,13 @@
                 </div>
               </div>
               <div class="passage-subs" :class="'mode-' + passageMode">
-                <template v-if="passageMode === 'perSub'">
+                <template v-if="passageMode === 'perSub' || passageMode === 'stem'">
                   <div v-for="(sub, si) in edit.sub_questions" :key="si" class="passage-sub">
                     <div class="rich rich-sub">
                       <span class="sub-label">{{ sub.label || `（${si + 1}）` }}</span>
                       <span v-html="renderFullContent(sub.stem)"></span>
                     </div>
-                    <div class="opts-inline">
+                    <div v-if="passageMode === 'perSub'" class="opts-inline">
                       <div v-for="(opt, oi) in (sub.options || [])" :key="oi" class="rich-opt" v-html="optionHtml(opt)"></div>
                     </div>
                   </div>
@@ -187,7 +187,7 @@
                 <template v-else>
                   <div class="sub-index-row">
                     <span v-for="(sub, si) in edit.sub_questions" :key="si" class="sub-index">
-                      {{ sub.label || `（${si + 1}）` }}<template v-if="passageMode === 'none'">——</template>
+                      {{ sub.label || `（${si + 1}）` }}<template v-if="passageMode === 'fillin'">——</template>
                     </span>
                   </div>
                   <template v-if="passageMode === 'shared'">
@@ -288,11 +288,10 @@
                     <el-button text type="danger" size="small" @click="edit.sub_questions.splice(si, 1)">删除小题</el-button>
                   </div>
                   <el-input
-                    v-if="passageMode !== 'none'"
                     v-model="sub.stem"
                     type="textarea"
                     :autosize="{ minRows: 1, maxRows: 4 }"
-                    placeholder="小题题干"
+                    :placeholder="passageMode === 'fillin' ? '小题（首字母已在材料里，可留空）' : '小题题干'"
                   />
                   <template v-if="passageMode === 'perSub'">
                     <div class="opts-edit-inline">
@@ -496,16 +495,20 @@ const addSubOption = (sub) => {
 // 篇章题形态分流（按数据判，不靠题型名硬编码）：
 //   shared  七选五：所有小题共享同一套选项（选项只出一次，小题仅编号）
 //   perSub  完形/阅读：每道小题各自不同的选项（选项横向排布）
-//   none    综合填空/任务型：小题无选项（仅编号，去首字母，横向）
+//   fillin  综合填空：无选项、首字母提示已在材料里 → 预览用紧凑编号（隐藏题干）
+//   stem    任务型阅读等：无选项但小题有完整题干 → 逐题展示题干
 const subOptionSig = (s) => JSON.stringify((s.options || []).map((o) => [o.label || '', o.content || '']))
 const passageMode = computed(() => {
   const subs = edit.sub_questions || []
   if (!subs.length) return 'none'
   const withOpts = subs.filter((s) => (s.options || []).length)
-  if (!withOpts.length) return 'none'
-  const sigs = new Set(subs.map(subOptionSig))
-  if (withOpts.length === subs.length && sigs.size === 1) return 'shared'
-  return 'perSub'
+  if (withOpts.length) {
+    const sigs = new Set(subs.map(subOptionSig))
+    if (withOpts.length === subs.length && sigs.size === 1) return 'shared'
+    return 'perSub'
+  }
+  // 无选项：仅综合填空用紧凑编号（题干只有首字母，与材料重复）；其余一律展示题干。
+  return edit.question_type === 'use_of_english' ? 'fillin' : 'stem'
 })
 // 共享选项池：取第一个带选项的小题作为基准（数据仍按小题存）。
 const sharedOptions = computed(() => {
