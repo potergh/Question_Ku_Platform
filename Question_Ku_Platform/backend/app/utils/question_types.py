@@ -19,6 +19,7 @@ QUESTION_TYPE_MAP = {
     "task_reading": "任务型阅读",
     "use_of_english": "综合填空",
     "sentence_completion": "完成句子",
+    "dialogue_completion": "七选五",
     "writing": "书面表达",
     # Chinese types (already correct)
     "选择题": "选择题",
@@ -44,7 +45,7 @@ SUBJECT_MAP = {
 # 复核/详情页不再把「第一小题的一套选项」当整题选项展示（Phase 2 拆分小题后修正）。
 PASSAGE_TYPES = {
     "cloze", "reading", "task_reading", "use_of_english",
-    "sentence_completion", "writing",
+    "sentence_completion", "dialogue_completion", "writing",
 }
 
 # 理化通用题型码：这些可被 section 推断出的英语专属题型覆盖；
@@ -66,6 +67,7 @@ _SECTION_TYPE_RULES: list[tuple[tuple[str, ...], str]] = [
     (("综合填空", "短文填空", "语法填空", "词汇运用"), "use_of_english"),
     (("阅读理解", "阅读"), "reading"),
     (("完成句子", "翻译"), "sentence_completion"),
+    (("补全对话", "七选五", "信息匹配"), "dialogue_completion"),
     (("书面表达", "作文"), "writing"),
     (("听力",), "listening"),
     # 理化生专属板块（英语规则已在上方命中，不会误入）：把常被压成 comprehensive 的题归位
@@ -83,7 +85,7 @@ SUBJECT_TYPE_CATALOG: dict[str, list[str]] = {
     "chemistry": ["single_choice", "multiple_choice", "fill_blank", "short_answer",
                   "experiment", "calculation", "comprehensive"],
     "english": ["listening", "grammar_choice", "cloze", "reading", "task_reading",
-                "use_of_english", "sentence_completion", "writing"],
+                "use_of_english", "sentence_completion", "dialogue_completion", "writing"],
 }
 
 

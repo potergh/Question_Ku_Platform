@@ -17,13 +17,14 @@ export const QUESTION_TYPE_MAP = {
   task_reading: '任务型阅读',
   use_of_english: '综合填空',
   sentence_completion: '完成句子',
+  dialogue_completion: '七选五',
   writing: '书面表达',
 }
 
 // 篇章题（一篇材料挂多小题）：单题模型下不再展示「第一小题的一套选项」，
 // 复核/详情页对这类题型隐藏选项区，避免「阅读理解显示单选选项」的误导。
 export const PASSAGE_TYPES = [
-  'cloze', 'reading', 'task_reading', 'use_of_english', 'sentence_completion', 'writing',
+  'cloze', 'reading', 'task_reading', 'use_of_english', 'sentence_completion', 'dialogue_completion', 'writing',
 ]
 
 export const isPassageType = (type) => PASSAGE_TYPES.includes(type)
@@ -33,7 +34,7 @@ export const SUBJECT_TYPE_CATALOG = {
   physics: ['single_choice', 'multiple_choice', 'fill_blank', 'experiment', 'calculation', 'comprehensive', 'short_answer'],
   math: ['single_choice', 'multiple_choice', 'fill_blank', 'comprehensive'],
   chemistry: ['single_choice', 'multiple_choice', 'fill_blank', 'short_answer', 'experiment', 'calculation', 'comprehensive'],
-  english: ['listening', 'grammar_choice', 'cloze', 'reading', 'task_reading', 'use_of_english', 'sentence_completion', 'writing'],
+  english: ['listening', 'grammar_choice', 'cloze', 'reading', 'task_reading', 'use_of_english', 'sentence_completion', 'dialogue_completion', 'writing'],
 }
 
 // 选定学科→该科题型码；未选学科→全学科并集（按目录出现顺序去重）。

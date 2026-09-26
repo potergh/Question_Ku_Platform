@@ -46,6 +46,17 @@ def test_infer_none_for_generic_sections():
         assert infer_question_type_from_section(section) is None
 
 
+def test_infer_dialogue_completion():
+    # 补全对话/七选五/信息匹配 → dialogue_completion（不再回落 comprehensive）
+    assert infer_question_type_from_section("五、补全对话") == "dialogue_completion"
+    assert infer_question_type_from_section("六、七选五") == "dialogue_completion"
+    assert infer_question_type_from_section("信息匹配") == "dialogue_completion"
+    # comprehensive 是通用码，会被 section 推断覆盖；用户已手改则保留
+    assert normalize_question_type("comprehensive", "五、补全对话") == "dialogue_completion"
+    assert normalize_question_type("reading", "五、补全对话") == "reading"
+    assert "dialogue_completion" in PASSAGE_TYPES
+
+
 def test_infer_science_sections():
     # 理化生专属板块归位（这些常被视觉模型压成 comprehensive/fill_blank）
     assert infer_question_type_from_section("五、实验题") == "experiment"

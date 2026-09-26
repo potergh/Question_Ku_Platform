@@ -246,10 +246,34 @@
         <div v-if="detailQuestion.sub_questions?.length" style="margin-top: 12px;">
           <h4>小题（{{ detailQuestion.sub_questions.length }} 道）</h4>
           <template v-if="detailPreviewMode">
-            <div v-for="(sub, si) in detailQuestion.sub_questions" :key="si" style="margin-bottom: 10px;">
-              <div class="rendered-preview"><b>{{ sub.label || `（${si + 1}）` }}</b> <span v-html="renderFullContent(sub.stem)"></span></div>
-              <div v-for="(opt, oi) in (sub.options || [])" :key="oi" class="option-rendered" v-html="opt.label + '. ' + renderOptionContent(opt.content)"></div>
-              <div v-if="sub.answer" style="color: #67c23a;">答案：{{ sub.answer }}</div>
+            <!-- 七选五：共享选项池只出一次 -->
+            <div v-if="libPassageMode === 'shared'" style="margin-bottom: 8px;">
+              <b style="font-size: 12px; color: #909399;">选项（公用）</b>
+              <div class="lib-opts-inline">
+                <div v-for="(opt, oi) in libSharedOptions" :key="oi" class="option-rendered" v-html="opt.label + '. ' + renderOptionContent(opt.content)"></div>
+              </div>
+            </div>
+            <!-- 完形/阅读：逐小题，选项横向 -->
+            <template v-if="libPassageMode === 'perSub'">
+              <div v-for="(sub, si) in detailQuestion.sub_questions" :key="si" style="margin-bottom: 8px;">
+                <div class="rendered-preview"><b>{{ sub.label || `（${si + 1}）` }}</b> <span v-html="renderFullContent(sub.stem)"></span></div>
+                <div class="lib-opts-inline">
+                  <div v-for="(opt, oi) in (sub.options || [])" :key="oi" class="option-rendered" v-html="opt.label + '. ' + renderOptionContent(opt.content)"></div>
+                </div>
+              </div>
+            </template>
+            <!-- 七选五/综合填空：小题仅编号，横向（综合填空去首字母） -->
+            <template v-else>
+              <div class="lib-sub-index-row">
+                <span v-for="(sub, si) in detailQuestion.sub_questions" :key="si" class="lib-sub-index">
+                  {{ sub.label || `（${si + 1}）` }}<template v-if="libPassageMode === 'none'">——</template>
+                </span>
+              </div>
+            </template>
+            <!-- 集中答案 -->
+            <div v-if="libSubAnswerList.length" class="lib-answer-summary">
+              <b>参考答案：</b>
+              <span v-for="(r, i) in libSubAnswerList" :key="i" class="lib-ans-item">{{ r.label }} {{ r.answer }}</span>
             </div>
           </template>
           <template v-else>
@@ -649,6 +673,27 @@ const showDetail = ref(false)
 const showBankFilters = ref(false)
 const detailQuestion = ref(null)
 const detailPreviewMode = ref(true) // true = preview, false = edit
+
+// 篇章题形态分流（与复核页一致）：shared 七选五 / perSub 完形阅读 / none 综合填空。
+const libSubSig = (s) => JSON.stringify((s.options || []).map((o) => [o.label || '', o.content || '']))
+const libPassageMode = computed(() => {
+  const subs = detailQuestion.value?.sub_questions || []
+  if (!subs.length) return 'none'
+  const withOpts = subs.filter((s) => (s.options || []).length)
+  if (!withOpts.length) return 'none'
+  const sigs = new Set(subs.map(libSubSig))
+  if (withOpts.length === subs.length && sigs.size === 1) return 'shared'
+  return 'perSub'
+})
+const libSharedOptions = computed(() => {
+  const src = (detailQuestion.value?.sub_questions || []).find((s) => (s.options || []).length)
+  return src ? src.options : []
+})
+const libSubAnswerList = computed(() =>
+  (detailQuestion.value?.sub_questions || [])
+    .map((s, i) => ({ label: s.label || `（${i + 1}）`, answer: (s.answer || '').trim() }))
+    .filter((r) => r.answer),
+)
 const aiAccepted = ref(false)
 const showTagDialog = ref(false)
 const selectedTagIds = ref([])
@@ -1650,6 +1695,39 @@ onUnmounted(() => {
 }
 .option-rendered :deep(.katex) {
   font-size: 1.0em;
+}
+
+/* 篇章题预览：选项横向、小题编号横向、答案集中 */
+.lib-opts-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 4px;
+}
+.lib-opts-inline .option-rendered {
+  flex: 0 1 auto;
+  margin-bottom: 0;
+}
+.lib-sub-index-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 4px 0 8px;
+}
+.lib-sub-index {
+  font-size: 14px;
+}
+.lib-answer-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.9;
+  color: #67c23a;
+}
+.lib-ans-item {
+  white-space: nowrap;
 }
 
 /* Tag management */
